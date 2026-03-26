@@ -64,18 +64,15 @@ if page == "📝 INSTANCES":
     except:
         st.warning("Impossible de charger le fichier ETAT FTTH RTC RTCL.xlsx")
 
-# ====================== PAGE RAPPORTS (version robuste) ======================
+# ====================== PAGE RAPPORTS (version corrigée) ======================
 elif page == "📊 RAPPORTS":
     st.subheader("📊 Rapports et Statistiques")
 
     try:
         etat_df = pd.read_excel("ETAT FTTH RTC RTCL.xlsx", sheet_name="SITUATION14.15")
         
-        # Chargement sécurisé du fichier Motif
-        try:
-            motif_df = pd.read_excel("MOTIF TOTAL (1).xlsx", sheet_name="MOTIF")
-        except:
-            motif_df = pd.DataFrame()
+        # Chargement du fichier Motif
+        motif_df = pd.read_excel("MOTIF TOTAL (1).xlsx", sheet_name="MOTIF")
 
         # KPIs
         col1, col2, col3, col4 = st.columns(4)
@@ -88,56 +85,61 @@ elif page == "📊 RAPPORTS":
 
         st.subheader("Répartition des Motifs")
 
-        # Recherche intelligente de la colonne "Motif"
-        motif_column = None
+        # Recherche intelligente de la colonne qui contient les motifs
+        motif_col = None
         for col in motif_df.columns:
-            if 'motif' in str(col).lower():
-                motif_column = col
+            col_str = str(col).lower()
+            if any(word in col_str for word in ['motif', 'detail', 'pc mauvais', 'adresse', 'refuse', 'saturé', 'injoinable']):
+                motif_col = col
                 break
 
-        if motif_column and not motif_df.empty:
-            motif_count = motif_df[motif_column].value_counts().head(15)
+        if motif_col and not motif_df.empty:
+            # Nettoyage des données
+            motif_series = motif_df[motif_col].astype(str).str.strip()
+            motif_series = motif_series[motif_series != 'nan']
+            
+            motif_count = motif_series.value_counts().head(15)
 
             # Graphique Barres
             fig1 = px.bar(
                 x=motif_count.index, 
                 y=motif_count.values,
                 title="Top 15 des Motifs les plus fréquents",
-                labels={"x": "Motif", "y": "Nombre"},
+                labels={"x": "Motif", "y": "Nombre d'occurrences"},
                 color=motif_count.values,
                 color_continuous_scale="blues"
             )
-            fig1.update_layout(xaxis_tickangle=-45)
+            fig1.update_layout(xaxis_tickangle=-45, height=500)
             st.plotly_chart(fig1, use_container_width=True)
 
             # Graphique Camembert
             fig2 = px.pie(
                 values=motif_count.values,
                 names=motif_count.index,
-                title="Répartition en pourcentage des motifs"
+                title="Répartition en pourcentage"
             )
             st.plotly_chart(fig2, use_container_width=True)
 
             # Tableau
             st.subheader("Détail des Motifs")
-            summary = motif_df[motif_column].value_counts().reset_index()
+            summary = motif_count.reset_index()
             summary.columns = ['Motif', 'Nombre']
             st.dataframe(summary, use_container_width=True)
 
         else:
-            st.info("Aucune colonne 'Motif' trouvée dans le fichier MOTIF TOTAL. Vérifiez le nom des colonnes.")
+            st.warning("Impossible de trouver la colonne des motifs. Voici les colonnes disponibles :")
+            st.write(motif_df.columns.tolist())
 
         # Par Secteur
-        if not etat_df.empty:
-            st.subheader("Commandes par Secteur")
-            secteur_col = next((col for col in etat_df.columns if 'secteur' in str(col).lower()), None)
-            if secteur_col:
-                secteur_count = etat_df[secteur_col].value_counts()
-                fig3 = px.bar(secteur_count, title="Nombre de commandes par Secteur")
-                st.plotly_chart(fig3, use_container_width=True)
+        st.subheader("Commandes par Secteur")
+        secteur_col = next((col for col in etat_df.columns if 'secteur' in str(col).lower()), None)
+        if secteur_col:
+            secteur_count = etat_df[secteur_col].value_counts()
+            fig3 = px.bar(secteur_count, title="Nombre de commandes par Secteur")
+            st.plotly_chart(fig3, use_container_width=True)
 
     except Exception as e:
-        st.error(f"Erreur lors du chargement des données : {str(e)}")
+        st.error(f"Erreur : {str(e)}")
 
 else:
     st.subheader(page)

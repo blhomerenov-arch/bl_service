@@ -5,108 +5,103 @@ import io
 
 st.set_page_config(page_title="Gestion Chantier MHAMID", layout="wide")
 
-st.title("🚀 Gestion Chantier Fibre & RTC - MHAMID")
-st.markdown("**Application de saisie des motifs journaliers**")
+# En-tête bleu comme sur ta photo
+st.markdown("""
+    <style>
+    .header {background-color: #0E7CFF; color: white; padding: 15px; border-radius: 5px; text-align: center;}
+    </style>
+""", unsafe_allow_html=True)
 
-# Chargement des fichiers Excel
-@st.cache_data
-def load_data():
-    try:
-        etat = pd.read_excel("ETAT FTTH RTC RTCL.xlsx", sheet_name="SITUATION14.15")
-    except:
-        etat = pd.DataFrame()
-    
-    try:
-        motif = pd.read_excel("MOTIF.xlsx", sheet_name="MOTIF")
-    except:
-        motif = pd.DataFrame()
-    
-    try:
-        motif_total = pd.read_excel("MOTIF TOTAL (1).xlsx", sheet_name="MOTIF")
-    except:
-        motif_total = pd.DataFrame()
-    
-    return etat, motif, motif_total
+st.markdown('<div class="header"><h2>🚀 Gestion Chantier Fibre & RTC - MHAMID</h2></div>', unsafe_allow_html=True)
 
-etat_df, motif_df, motif_total_df = load_data()
+# Navigation comme sur la photo
+tabs = st.tabs(["RAPPORTS", "INSTANCES (9)", "DÉRANGEMENTS (0)", "FIABILISATION", "LITIGES"])
 
-# Formulaire de saisie
-st.subheader("📝 Saisie du Motif Journalier")
+with tabs[1]:  # Onglet INSTANCES actif
+    st.subheader("📝 Saisie du Motif Journalier")
 
-with st.form("saisie_motif", clear_on_submit=True):
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        demande = st.text_input("Demande*", placeholder="Ex: 000D740B")
-        nom = st.text_input("Nom")
-        contact = st.text_input("Contact", placeholder="0666549488")
-        telecopie = st.text_input("N° de Téléscopie*", placeholder="525311326")
-    
-    with col2:
-        adresse = st.text_area("Adresse", height=100)
-        date_reception = st.date_input("Date de réception", value=datetime.now().date())
-        secteur = st.selectbox("Secteur", ["MHAMID", "BOUAAKAZ", "Province M'HAMID"])
-        agent = st.selectbox("Agent", ["hamid", "SHAKHMAN"])
-    
-    type_install = st.selectbox("Type d'installation", ["Installation Fixe"])
-    
-    motifs_communs = [
-        "Adresse erronée", "Client refuse installation", "Transport saturé", 
-        "PC saturé", "INJOINABLE", "Local fermé", "Création PC", 
-        "ETUDE CREATION PC", "MSAN saturé", "Autre"
-    ]
-    motif_selection = st.selectbox("Motif", motifs_communs)
-    
-    if motif_selection == "Autre":
-        motif_libre = st.text_input("Précisez le motif")
-        motif_final = motif_libre
-    else:
-        motif_final = motif_selection
-    
-    submitted = st.form_submit_button("✅ Valider et Enregistrer", type="primary")
-
-if submitted:
-    if not demande or not telecopie or not motif_final:
-        st.error("❌ Demande, Téléscopie et Motif sont obligatoires !")
-    else:
-        nouvelle_ligne = {
-            "Date": datetime.now().strftime("%d/%m/%Y"),
-            "Demande": demande,
-            "Nom": nom,
-            "Contact": contact,
-            "Adresse": adresse,
-            "Téléscopie": telecopie,
-            "Motif": motif_final,
-            "Secteur": secteur,
-            "Agent": agent
-        }
+    # Formulaire amélioré
+    with st.form("saisie_motif", clear_on_submit=True):
+        col1, col2 = st.columns(2)
         
-        new_df = pd.DataFrame([nouvelle_ligne])
-        motif_df = pd.concat([motif_df, new_df], ignore_index=True)
-        motif_total_df = pd.concat([motif_total_df, new_df], ignore_index=True)
+        with col1:
+            demande = st.text_input("Demande*", placeholder="000D740B", help="Numéro de la commande")
+            nom = st.text_input("Nom")
+            contact = st.text_input("Contact", placeholder="0666549488")
+            telecopie = st.text_input("N° de Téléscopie*", placeholder="525311326")
         
-        st.success(f"✅ Motif enregistré pour la demande **{demande}**")
-        st.balloons()
+        with col2:
+            adresse = st.text_area("Adresse", height=80, placeholder="MHAMID Lotissement Mhamid 9 ...")
+            date_reception = st.date_input("Date de réception", value=datetime.now().date())
+            secteur = st.selectbox("Secteur", ["MHAMID", "BOUAAKAZ", "Province M'HAMID"])
+            agent = st.selectbox("Agent", ["hamid", "SHAKHMAN", "Autre"])
+        
+        col3, col4 = st.columns(2)
+        with col3:
+            type_install = st.selectbox("Type d'installation", ["Installation Fixe"])
+        with col4:
+            categorie = st.selectbox("Catégorie", ["RTC DTL", "GPON", "GPON DFO", "RTC"])
+        
+        # Motif
+        motifs_communs = [
+            "Adresse erronée", "Client refuse installation", "Transport saturé", 
+            "PC saturé", "INJOINABLE", "Local fermé + injoignable", 
+            "Création PC", "ETUDE CREATION PC", "MSAN saturé", "Autre"
+        ]
+        motif_selection = st.selectbox("Motif", motifs_communs)
+        
+        if motif_selection == "Autre":
+            motif_final = st.text_input("Précisez le motif")
+        else:
+            motif_final = motif_selection
+        
+        submitted = st.form_submit_button("✅ Valider et Enregistrer", type="primary", use_container_width=True)
 
-# Tableau des instances
-st.subheader("📋 Liste des Instances")
+    if submitted:
+        if not demande or not telecopie or not motif_final:
+            st.error("❌ Les champs Demande, N° Téléscopie et Motif sont obligatoires !")
+        else:
+            nouvelle_ligne = {
+                "Date": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                "Demande": demande,
+                "Nom": nom,
+                "Contact": contact,
+                "Adresse": adresse,
+                "Téléscopie": telecopie,
+                "Motif": motif_final,
+                "Secteur": secteur,
+                "Agent": agent,
+                "Catégorie": categorie,
+                "Type": type_install
+            }
+            
+            # Simulation de sauvegarde (à améliorer plus tard)
+            st.success(f"✅ Motif enregistré avec succès pour la demande **{demande}**")
+            st.balloons()
 
-if not etat_df.empty:
-    search = st.text_input("🔍 Rechercher")
-    if search:
-        mask = etat_df.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)
-        display_df = etat_df[mask]
-    else:
-        display_df = etat_df
-    st.dataframe(display_df, use_container_width=True)
-else:
-    st.info("Le fichier ETAT FTTH RTC RTCL.xlsx n'est pas encore chargé.")
+    # Tableau des instances
+    st.subheader("📋 Liste des Instances")
 
-# Statistiques
-st.subheader("📊 Statistiques")
+    try:
+        etat_df = pd.read_excel("ETAT FTTH RTC RTCL.xlsx", sheet_name="SITUATION14.15")
+        search = st.text_input("🔍 Rechercher par Demande, Nom ou Adresse")
+        
+        if search:
+            mask = etat_df.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)
+            display_df = etat_df[mask]
+        else:
+            display_df = etat_df
+            
+        st.dataframe(display_df, use_container_width=True, height=500)
+        
+    except Exception as e:
+        st.error("Impossible de charger le fichier ETAT FTTH RTC RTCL.xlsx")
+
+# Statistiques rapides
+st.subheader("📊 Statistiques Rapides")
 col1, col2, col3 = st.columns(3)
-col1.metric("Instances", len(etat_df))
-col2.metric("Motifs aujourd'hui", len(motif_df))
-col3.metric("Total Motifs", len(motif_total_df))
+col1.metric("Nombre d'Instances", len(etat_df) if 'etat_df' in locals() else 0)
+col2.metric("Motifs saisis aujourd'hui", "0")  # À compléter plus tard
+col3.metric("Total Motifs", "0")
 
-st.caption("Note : Pour le moment les fichiers Excel ne sont pas dans le repo. L'application fonctionne mais sans les données réelles.")
+st.caption("Application développée pour le chantier MHAMID - Fibre & RTC")

@@ -5,7 +5,6 @@ import plotly.express as px
 
 st.set_page_config(page_title="Gestion Chantier MHAMID", layout="wide")
 
-# Style
 st.markdown("""
     <style>
     .header {background-color: #0E7CFF; color: white; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 15px;}
@@ -14,7 +13,6 @@ st.markdown("""
 
 st.markdown('<div class="header"><h2>Gestion Chantier Fibre & RTC - MHAMID</h2></div>', unsafe_allow_html=True)
 
-# Navigation
 page = st.radio(
     "Navigation",
     ["📝 INSTANCES", "📊 RAPPORTS", "⚠️ DÉRANGEMENTS", "🔧 FIABILISATION", "⚖️ LITIGES"],
@@ -28,7 +26,6 @@ if page == "📝 INSTANCES":
 
     with st.form("saisie_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
-
         with col1:
             demande = st.text_input("Demande*", placeholder="000D740B")
             nom = st.text_input("Nom")
@@ -60,7 +57,6 @@ if page == "📝 INSTANCES":
         else:
             st.error("Demande, Téléscopie et Motif sont obligatoires")
 
-    # Tableau
     st.subheader("Liste des Instances")
     try:
         df = pd.read_excel("ETAT FTTH RTC RTCL.xlsx", sheet_name="SITUATION14.15")
@@ -68,42 +64,53 @@ if page == "📝 INSTANCES":
     except:
         st.warning("Impossible de charger le fichier ETAT FTTH RTC RTCL.xlsx")
 
-# ====================== PAGE RAPPORTS AMÉLIORÉE ======================
+# ====================== PAGE RAPPORTS (version robuste) ======================
 elif page == "📊 RAPPORTS":
     st.subheader("📊 Rapports et Statistiques")
 
     try:
-        # Chargement des données
         etat_df = pd.read_excel("ETAT FTTH RTC RTCL.xlsx", sheet_name="SITUATION14.15")
-        motif_df = pd.read_excel("MOTIF TOTAL (1).xlsx", sheet_name="MOTIF")
+        
+        # Chargement sécurisé du fichier Motif
+        try:
+            motif_df = pd.read_excel("MOTIF TOTAL (1).xlsx", sheet_name="MOTIF")
+        except:
+            motif_df = pd.DataFrame()
 
         # KPIs
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Total Commandes", len(etat_df))
         col2.metric("Motifs Cumulés", len(motif_df))
-        col3.metric("Délai Moyen (jours)", round(etat_df['Délai(j)'].mean(), 1) if 'Délai(j)' in etat_df.columns else "N/A")
-        col4.metric("Commandes VA", len(etat_df[etat_df['Etat'] == 'VA']) if 'Etat' in etat_df.columns else 0)
+        col3.metric("Délai Moyen", round(etat_df.get('Délai(j)', pd.Series([0])).mean(), 1))
+        col4.metric("Commandes VA", len(etat_df[etat_df.get('Etat', pd.Series([])) == 'VA']))
 
         st.divider()
 
-        # Graphiques
         st.subheader("Répartition des Motifs")
 
-        if not motif_df.empty and 'Motif' in motif_df.columns:
-            motif_count = motif_df['Motif'].value_counts().head(15)
-            
-            # Graphique en barres
+        # Recherche intelligente de la colonne "Motif"
+        motif_column = None
+        for col in motif_df.columns:
+            if 'motif' in str(col).lower():
+                motif_column = col
+                break
+
+        if motif_column and not motif_df.empty:
+            motif_count = motif_df[motif_column].value_counts().head(15)
+
+            # Graphique Barres
             fig1 = px.bar(
                 x=motif_count.index, 
                 y=motif_count.values,
                 title="Top 15 des Motifs les plus fréquents",
-                labels={"x": "Motif", "y": "Nombre d'occurrences"},
+                labels={"x": "Motif", "y": "Nombre"},
                 color=motif_count.values,
                 color_continuous_scale="blues"
             )
+            fig1.update_layout(xaxis_tickangle=-45)
             st.plotly_chart(fig1, use_container_width=True)
 
-            # Graphique en camembert
+            # Graphique Camembert
             fig2 = px.pie(
                 values=motif_count.values,
                 names=motif_count.index,
@@ -111,27 +118,29 @@ elif page == "📊 RAPPORTS":
             )
             st.plotly_chart(fig2, use_container_width=True)
 
-        # Tableau détaillé des motifs
-        st.subheader("Détail des Motifs")
-        if not motif_df.empty:
-            motif_summary = motif_df['Motif'].value_counts().reset_index()
-            motif_summary.columns = ['Motif', 'Nombre']
-            st.dataframe(motif_summary, use_container_width=True)
+            # Tableau
+            st.subheader("Détail des Motifs")
+            summary = motif_df[motif_column].value_counts().reset_index()
+            summary.columns = ['Motif', 'Nombre']
+            st.dataframe(summary, use_container_width=True)
+
+        else:
+            st.info("Aucune colonne 'Motif' trouvée dans le fichier MOTIF TOTAL. Vérifiez le nom des colonnes.")
 
         # Par Secteur
-        if 'Secteur' in etat_df.columns:
+        if not etat_df.empty:
             st.subheader("Commandes par Secteur")
-            secteur_count = etat_df['Secteur'].value_counts()
-            fig3 = px.bar(secteur_count, title="Nombre de commandes par Secteur")
-            st.plotly_chart(fig3, use_container_width=True)
+            secteur_col = next((col for col in etat_df.columns if 'secteur' in str(col).lower()), None)
+            if secteur_col:
+                secteur_count = etat_df[secteur_col].value_counts()
+                fig3 = px.bar(secteur_count, title="Nombre de commandes par Secteur")
+                st.plotly_chart(fig3, use_container_width=True)
 
     except Exception as e:
         st.error(f"Erreur lors du chargement des données : {str(e)}")
-        st.info("Assurez-vous que les fichiers Excel sont bien présents dans le repository.")
 
-# ====================== AUTRES PAGES ======================
 else:
     st.subheader(page)
-    st.info(f"Page **{page}** en cours de développement. Nous pouvons l'améliorer selon vos besoins.")
+    st.info(f"Page **{page}** en cours de développement.")
 
 st.caption("Application de gestion de chantier MHAMID - Fibre & RTC")

@@ -8,7 +8,7 @@ st.set_page_config(page_title="Gestion Chantier MHAMID", layout="wide")
 st.markdown("""
     <style>
     .header {background-color: #0E7CFF; color: white; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 15px;}
-    .info-box {background-color: #f0f8ff; padding: 15px; border-radius: 8px; border-left: 5px solid #0E7CFF;}
+    .success-box {background-color: #d4edda; padding: 10px; border-radius: 8px; border-left: 5px solid #28a745;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -78,23 +78,29 @@ elif page == "📊 RAPPORTS":
         col1.metric("Total Commandes", len(etat_df))
         col2.metric("Total Motifs", len(motif_df))
         col3.metric("Délai Moyen", round(etat_df.get('Délai(j)', pd.Series([0])).mean(), 1))
-        col4.metric("Commandes VA", len(etat_df[etat_df.get('Etat', pd.Series([])) == 'VA']))
+        
+        # Détection colonne État
+        etat_col = None
+        for col in etat_df.columns:
+            if any(k in str(col).lower() for k in ['etat', 'état', 'state', 'status']):
+                etat_col = col
+                break
+        if etat_col:
+            va_count = len(etat_df[etat_df[etat_col].astype(str).str.upper() == 'VA'])
+            col4.metric("Commandes VA", va_count)
 
         st.divider()
 
         # ==================== DÉTECTION MOTIF ====================
         st.subheader("Répartition des Motifs")
-
         motif_col = None
-        motif_keywords = ['motif', 'detail motif', 'pc mauvais', 'adresse erron', 'refuse', 'saturé', 'injoinable', 'création', 'etude']
+        motif_keywords = ['motif', 'detail motif', 'pc mauvais', 'adresse', 'refuse', 'saturé', 'injoinable']
 
         for col in motif_df.columns:
-            col_str = str(col).lower()
-            if any(kw in col_str for kw in motif_keywords):
+            if any(k in str(col).lower() for k in motif_keywords):
                 motif_col = col
                 break
 
-        # Backup : prendre la première colonne texte non vide
         if not motif_col and not motif_df.empty:
             for col in motif_df.columns:
                 if motif_df[col].dtype == "object" and motif_df[col].notna().sum() > 10:
@@ -106,63 +112,53 @@ elif page == "📊 RAPPORTS":
             motif_series = motif_series[(motif_series != 'nan') & (motif_series != '')]
             motif_count = motif_series.value_counts().head(15)
 
-            fig1 = px.bar(
-                x=motif_count.index, 
-                y=motif_count.values,
-                title=f"Top 15 Motifs (Colonne : {motif_col})",
-                labels={"x": "Motif", "y": "Nombre"},
-                color=motif_count.values,
-                color_continuous_scale="blues"
-            )
+            fig1 = px.bar(x=motif_count.index, y=motif_count.values,
+                         title=f"Top 15 Motifs (Colonne : {motif_col})",
+                         color=motif_count.values, color_continuous_scale="blues")
             fig1.update_layout(xaxis_tickangle=-45, height=520)
             st.plotly_chart(fig1, use_container_width=True)
 
-            fig2 = px.pie(values=motif_count.values, names=motif_count.index, title="Répartition % des Motifs")
+            fig2 = px.pie(values=motif_count.values, names=motif_count.index, title="Répartition %")
             st.plotly_chart(fig2, use_container_width=True)
 
-            st.subheader("Détail des Motifs")
-            st.dataframe(motif_count.reset_index().rename(columns={motif_col: 'Motif', 0: 'Nombre'}), 
-                        use_container_width=True)
-
+            st.dataframe(motif_count.reset_index().rename(columns={0: 'Nombre'}), use_container_width=True)
             st.success(f"✅ Colonne Motif détectée : **{motif_col}**")
         else:
             st.warning("Impossible de détecter la colonne Motif")
-            st.write("Colonnes disponibles :", motif_df.columns.tolist())
+            st.write("Colonnes disponibles :", list(motif_df.columns))
 
         st.divider()
 
         # ==================== DÉTECTION SECTEUR ====================
         st.subheader("Commandes par Secteur")
-
         secteur_col = None
-        secteur_keywords = ['secteur', 'sector', 'mhami', 'bouaakaz', 'province']
-
         for col in etat_df.columns:
-            col_str = str(col).lower()
-            if any(kw in col_str for kw in secteur_keywords):
+            if any(k in str(col).lower() for k in ['secteur', 'sector', 'mhami', 'bouaakaz']):
                 secteur_col = col
                 break
 
-        if not secteur_col and not etat_df.empty:
-            for col in etat_df.columns:
-                if etat_df[col].dtype == "object" and etat_df[col].notna().sum() > 5:
-                    secteur_col = col
-                    break
-
         if secteur_col:
             secteur_count = etat_df[secteur_col].value_counts()
-            fig3 = px.bar(
-                x=secteur_count.index, 
-                y=secteur_count.values,
-                title=f"Commandes par Secteur (Colonne : {secteur_col})",
-                labels={"x": "Secteur", "y": "Nombre"}
-            )
+            fig3 = px.bar(x=secteur_count.index, y=secteur_count.values, 
+                         title=f"Commandes par Secteur (Colonne : {secteur_col})")
             st.plotly_chart(fig3, use_container_width=True)
-
             st.success(f"✅ Colonne Secteur détectée : **{secteur_col}**")
         else:
             st.warning("Impossible de détecter la colonne Secteur")
-            st.write("Colonnes disponibles dans ETAT :", etat_df.columns.tolist())
+
+        st.divider()
+
+        # ==================== DÉTECTION ÉTAT ====================
+        st.subheader("Répartition par État")
+        if etat_col:
+            etat_count = etat_df[etat_col].value_counts()
+            fig4 = px.bar(x=etat_count.index, y=etat_count.values, 
+                         title=f"Répartition par État (Colonne : {etat_col})",
+                         color=etat_count.values, color_continuous_scale="viridis")
+            st.plotly_chart(fig4, use_container_width=True)
+            st.success(f"✅ Colonne État détectée : **{etat_col}**")
+        else:
+            st.warning("Impossible de détecter la colonne État")
 
     except Exception as e:
         st.error(f"Erreur : {str(e)}")

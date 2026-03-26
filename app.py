@@ -2,11 +2,9 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import plotly.express as px
-import io
 
 st.set_page_config(page_title="Gestion Chantier MHAMID", layout="wide")
 
-# Style
 st.markdown("""
     <style>
     .header {background-color: #0E7CFF; color: white; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 15px;}
@@ -16,7 +14,6 @@ st.markdown("""
 
 st.markdown('<div class="header"><h2>Gestion Chantier Fibre & RTC - MHAMID</h2></div>', unsafe_allow_html=True)
 
-# ====================== NAVIGATION ======================
 page = st.radio(
     "Navigation",
     ["📝 INSTANCES", "📊 RAPPORTS", "⚠️ DÉRANGEMENTS", "🔧 FIABILISATION", "⚖️ LITIGES"],
@@ -24,9 +21,8 @@ page = st.radio(
     label_visibility="collapsed"
 )
 
-# ====================== FONCTION DE DÉTECTION OPTIMISÉE ======================
+# ====================== FONCTION DÉTECTION COLONNES ======================
 def find_column(df, keywords):
-    """Détecte automatiquement une colonne selon une liste de mots-clés"""
     if df.empty:
         return None
     for col in df.columns:
@@ -38,7 +34,7 @@ def find_column(df, keywords):
 # ====================== PAGE INSTANCES ======================
 if page == "📝 INSTANCES":
     st.subheader("📝 Saisie du Motif Journalier")
-    # (formulaire identique, je le garde court pour ne pas alourdir)
+
     with st.form("saisie_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         with col1:
@@ -46,33 +42,38 @@ if page == "📝 INSTANCES":
             nom = st.text_input("Nom")
             contact = st.text_input("Contact")
             adresse = st.text_area("Adresse", height=80)
+
         with col2:
             telecopie = st.text_input("N° de Téléscopie*", placeholder="525311326")
             date_reception = st.date_input("Date de réception", datetime.now().date())
             secteur = st.selectbox("Secteur", ["MHAMID", "BOUAAKAZ", "Province M'HAMID"])
             agent = st.selectbox("Agent", ["hamid", "SHAKHMAN"])
 
-        motif = st.selectbox("Motif", [
+        motif_options = [
             "Adresse erronée", "Client refuse installation", "Transport saturé",
             "PC saturé", "INJOINABLE", "Local fermé + injoignable",
             "Création PC", "ETUDE CREATION PC", "MSAN saturé", "Autre"
-        ])
+        ]
+        motif = st.selectbox("Motif", motif_options)
+
         if motif == "Autre":
             motif = st.text_input("Précisez le motif")
 
-        if st.form_submit_button("✅ Valider et Enregistrer", type="primary", use_container_width=True):
-            if demande and telecopie and motif:
-                st.success(f"✅ Motif enregistré pour **{demande}**")
-                st.balloons()
+        submitted = st.form_submit_button("✅ Valider et Enregistrer", type="primary", use_container_width=True)
+
+    if submitted:
+        if demande and telecopie and motif:
+            st.success(f"✅ Motif enregistré pour la demande **{demande}**")
+            st.balloons()
 
     st.subheader("Liste des Instances")
     try:
         df = pd.read_excel("ETAT FTTH RTC RTCL.xlsx", sheet_name="SITUATION14.15")
         st.dataframe(df, use_container_width=True, height=500)
     except:
-        st.warning("Impossible de charger ETAT FTTH RTC RTCL.xlsx")
+        st.warning("Impossible de charger le fichier ETAT FTTH RTC RTCL.xlsx")
 
-# ====================== PAGE RAPPORTS (version finale optimisée) ======================
+# ====================== PAGE RAPPORTS ======================
 elif page == "📊 RAPPORTS":
     st.subheader("📊 Rapports et Statistiques")
 
@@ -80,24 +81,22 @@ elif page == "📊 RAPPORTS":
         etat_df = pd.read_excel("ETAT FTTH RTC RTCL.xlsx", sheet_name="SITUATION14.15")
         motif_df = pd.read_excel("MOTIF TOTAL (1).xlsx", sheet_name="MOTIF")
 
-        # ==================== KPIs ====================
+        # KPIs
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Total Commandes", len(etat_df))
         col2.metric("Total Motifs", len(motif_df))
 
-        # Détection Délai
         delai_col = find_column(etat_df, ['délai', 'delai', 'délai(j)', 'delai(j)'])
         delai_moyen = round(etat_df[delai_col].mean(), 1) if delai_col else "N/A"
         col3.metric("Délai Moyen (jours)", delai_moyen)
 
-        # Détection État
         etat_col = find_column(etat_df, ['etat', 'état', 'state', 'status'])
         va_count = len(etat_df[etat_df[etat_col].astype(str).str.upper() == 'VA']) if etat_col else 0
         col4.metric("Commandes VA", va_count)
 
         st.divider()
 
-        # ==================== GRAPHIQUES MOTIFS ====================
+        # Motifs
         st.subheader("Répartition des Motifs")
         motif_col = find_column(motif_df, ['motif', 'detail motif', 'pc mauvais'])
         if motif_col:
@@ -112,9 +111,25 @@ elif page == "📊 RAPPORTS":
             fig2 = px.pie(values=motif_count.values, names=motif_count.index, title="Répartition %")
             st.plotly_chart(fig2, use_container_width=True)
 
-        # ==================== GRAPHIQUES SECTEUR & ÉTAT ====================
-        st.subheader("Commandes par Secteur & État")
+        # Secteur & État
+        st.subheader("Analyse par Secteur et État")
         col_a, col_b = st.columns(2)
 
         with col_a:
-            secteur_col = find_column(et
+            secteur_col = find_column(etat_df, ['secteur', 'sector'])
+            if secteur_col:
+                fig3 = px.bar(etat_df[secteur_col].value_counts(), title="Par Secteur")
+                st.plotly_chart(fig3, use_container_width=True)
+
+        with col_b:
+            if etat_col:
+                fig4 = px.bar(etat_df[etat_col].value_counts(), title="Par État")
+                st.plotly_chart(fig4, use_container_width=True)
+
+    except Exception as e:
+        st.error(f"Erreur lors du chargement des données : {str(e)}")
+
+else:
+    st.info(f"Page **{page}** en cours de développement.")
+
+st.caption("Application de gestion de chantier MHAMID - Fibre & RTC")

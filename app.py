@@ -16,7 +16,6 @@ USERS = {
     "admin": "1234",
     "hamid": "hamid123",
     "shakhman": "shakhman123"
-    # ← Ajoute ici d'autres utilisateurs : "nom": "motdepasse"
 }
 
 if not st.session_state.authenticated:
@@ -28,38 +27,53 @@ if not st.session_state.authenticated:
         if username in USERS and USERS[username] == password:
             st.session_state.authenticated = True
             st.session_state.username = username
-            st.success(f"✅ Connexion réussie ! Bienvenue {username}")
+            st.success(f"✅ Connexion réussie ! Bienvenue {username.upper()}")
             st.rerun()
         else:
-            st.error("❌ Identifiants incorrects. Vérifiez votre nom d'utilisateur et mot de passe.")
+            st.error("❌ Identifiants incorrects. Vérifiez nom d'utilisateur et mot de passe.")
     st.stop()
 
 # ====================== STYLE ======================
 st.markdown("""
     <style>
     .header {background-color: #0E7CFF; color: white; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px;}
+    .success {background-color: #d4edda; padding: 10px; border-radius: 8px;}
     </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="header"><h2>🚧 Gestion Chantier Fibre & RTC - MHAMID</h2></div>', unsafe_allow_html=True)
 
-# ====================== FONCTION DÉTECTION COLONNES ======================
+# ====================== FONCTION RECHERCHE AUTOMATIQUE DES COLONNES ======================
 def find_column(df, keywords):
+    """
+    Recherche intelligente une colonne dans un DataFrame selon une liste de mots-clés.
+    
+    Exemple : find_column(df, ['op', 'OP', 'operation']) → retourne la colonne qui contient "op"
+    Fonctionne même si les noms de colonnes sont mal écrits ou en majuscules/minuscules.
+    """
     if df is None or df.empty:
         return None
+    
     for col in df.columns:
-        if any(k.lower() in str(col).lower() for k in keywords):
-            return col
+        col_str = str(col).lower().strip()
+        for keyword in [k.lower().strip() for k in keywords]:
+            if keyword in col_str:
+                return col  # Retourne le vrai nom de la colonne tel qu'il est dans le fichier
     return None
 
-# ====================== CHARGEMENT / SAUVEGARDE AUTOMATIQUE INSTANCES ======================
+# Explication détaillée de cette fonction (tu peux la supprimer plus tard) :
+# - Elle parcourt toutes les colonnes du fichier
+# - Elle transforme le nom de la colonne et les mots-clés en minuscules pour éviter les problèmes de casse
+# - Elle cherche si le mot-clé est "contenu" dans le nom de la colonne (ex: "code op" contient "op")
+# - Très utile quand les fichiers Excel ont des noms de colonnes différents (OP, Code OP, Opération, etc.)
+
+# ====================== SAUVEGARDE AUTOMATIQUE ======================
 INSTANCES_FILE = "instances_saved.xlsx"
 
 if "instances" not in st.session_state:
     if os.path.exists(INSTANCES_FILE):
         try:
             st.session_state.instances = pd.read_excel(INSTANCES_FILE)
-            st.success(f"✅ {len(st.session_state.instances)} instances chargées depuis le fichier sauvegardé.")
         except:
             st.session_state.instances = pd.DataFrame(columns=["Demande", "Nom", "Contact", "Adresse", "Téléscopie", "Date Réception", "Secteur", "Agent", "Motif", "Date Saisie"])
     else:
@@ -106,16 +120,18 @@ if page == "📝 INSTANCES":
             if demande and telecopie and motif:
                 new_row = pd.DataFrame([{
                     "Demande": demande, "Nom": nom, "Contact": contact, "Adresse": adresse,
-                    "Téléscopie": telecopie, "Date Réception": date_reception, "Secteur": secteur,
-                    "Agent": agent, "Motif": motif, "Date Saisie": datetime.now()
+                    "Téléscopie": telecopie, "Date Réception": date_reception,
+                    "Secteur": secteur, "Agent": agent, "Motif": motif,
+                    "Date Saisie": datetime.now()
                 }])
                 st.session_state.instances = pd.concat([st.session_state.instances, new_row], ignore_index=True)
-                save_instances()                     # ← Sauvegarde automatique Excel
-                st.success(f"✅ Motif enregistré pour **{demande}** et sauvegardé automatiquement")
+                save_instances()
+                st.success(f"✅ Instance enregistrée et sauvegardée pour la demande **{demande}**")
                 st.balloons()
             else:
-                st.error("❌ Les champs **Demande**, **Téléscopie** et **Motif** sont obligatoires.")
+                st.error("❌ Les champs Demande, Téléscopie et Motif sont obligatoires.")
 
+    # Affichage instances
     st.subheader("📋 Instances saisies")
     if not st.session_state.instances.empty:
         st.dataframe(st.session_state.instances, use_container_width=True)
@@ -124,14 +140,7 @@ if page == "📝 INSTANCES":
     else:
         st.info("Aucune instance saisie pour le moment.")
 
-    try:
-        df = pd.read_excel("ETAT FTTH RTC RTCL.xlsx", sheet_name="SITUATION14.15")
-        st.subheader("📂 Fichier de référence")
-        st.dataframe(df, use_container_width=True, height=400)
-    except:
-        st.warning("Impossible de charger ETAT FTTH RTC RTCL.xlsx")
-
-# ====================== PAGE RAPPORTS ======================
+# ====================== PAGE RAPPORTS - VALIDATION AVANCÉE ======================
 elif page == "📊 RAPPORTS":
     st.subheader("📊 Rapports et Statistiques")
 
@@ -139,55 +148,74 @@ elif page == "📊 RAPPORTS":
         etat_df = pd.read_excel("ETAT FTTH RTC RTCL.xlsx", sheet_name="SITUATION14.15")
         motif_df = pd.read_excel("MOTIF TOTAL (1).xlsx", sheet_name="MOTIF")
 
-        # ====================== IMPORT + VALIDATION EXCEL ======================
-        st.subheader("📥 Import et Validation Tableau Excel")
-        uploaded_file = st.file_uploader("Importez votre fichier Excel (OP + Etat)", type=["xlsx", "xls"])
+        # ====================== IMPORT EXCEL AVEC VALIDATION AVANCÉE ======================
+        st.subheader("📥 Import et Validation Avancée du Tableau Excel")
+
+        uploaded_file = st.file_uploader("Importez votre fichier Excel à valider (colonnes OP et Etat)", type=["xlsx", "xls"])
 
         if uploaded_file:
-            imported_df = pd.read_excel(uploaded_file)
-            st.write("Colonnes détectées :", list(imported_df.columns))
+            df_import = pd.read_excel(uploaded_file)
+            st.write("**Colonnes détectées dans le fichier :**", list(df_import.columns))
 
-            op_col = find_column(imported_df, ['op', 'OP'])
-            etat_col = find_column(imported_df, ['etat', 'Etat', 'état', 'state'])
+            # Recherche automatique des colonnes
+            op_col = find_column(df_import, ['op', 'OP', 'operation', 'code op'])
+            etat_col = find_column(df_import, ['etat', 'Etat', 'état', 'state', 'status'])
 
             if op_col and etat_col:
-                # Validation
-                valid_op = ["NA", "RM", "TR", "TL"]
-                valid_etat = ["VA", "RE"]
+                st.success(f"✅ Colonnes trouvées → **OP** : `{op_col}` | **Etat** : `{etat_col}`")
 
-                imported_df[op_col] = imported_df[op_col].astype(str).str.strip().str.upper()
-                imported_df[etat_col] = imported_df[etat_col].astype(str).str.strip().str.upper()
+                # Nettoyage avancé
+                df_import[op_col] = df_import[op_col].astype(str).str.strip().str.upper()
+                df_import[etat_col] = df_import[etat_col].astype(str).str.strip().str.upper()
 
-                valid_mask = (imported_df[op_col].isin(valid_op)) & (imported_df[etat_col].isin(valid_etat))
-                valid_df = imported_df[valid_mask].copy()
-                invalid_df = imported_df[~valid_mask].copy()
+                # ====================== VALIDATION AVANCÉE ======================
+                valid_op_values = ["NA", "RM", "TR", "TL"]
+                valid_etat_values = ["VA", "RE"]
 
-                st.success(f"✅ {len(valid_df)} lignes valides | {len(invalid_df)} lignes rejetées")
+                # Création des masques de validation
+                op_valid = df_import[op_col].isin(valid_op_values)
+                etat_valid = df_import[etat_col].isin(valid_etat_values)
 
-                col1, col2 = st.columns(2)
-                col1.metric("Lignes valides (OP + Etat)", len(valid_df))
-                col2.metric("Lignes rejetées", len(invalid_df))
+                df_import['OP_Valide'] = op_valid
+                df_import['Etat_Valide'] = etat_valid
+                df_import['Ligne_Valide'] = op_valid & etat_valid
+
+                valid_df = df_import[df_import['Ligne_Valide']].copy()
+                invalid_df = df_import[~df_import['Ligne_Valide']].copy()
+
+                # Affichage des résultats
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Lignes", len(df_import))
+                col2.metric("✅ Lignes Valides", len(valid_df), delta=len(valid_df) - len(df_import))
+                col3.metric("❌ Lignes Invalides", len(invalid_df))
 
                 if not invalid_df.empty:
-                    st.error("Lignes avec erreurs (OP ou Etat invalide) :")
-                    st.dataframe(invalid_df[[op_col, etat_col]], use_container_width=True)
+                    st.error("⚠️ Lignes avec erreurs détectées :")
+                    st.dataframe(invalid_df[[op_col, etat_col, 'OP_Valide', 'Etat_Valide']], use_container_width=True)
 
-                st.dataframe(valid_df, use_container_width=True)
+                st.success(f"✅ {len(valid_df)} lignes validées avec succès")
+                st.dataframe(valid_df.drop(columns=['OP_Valide', 'Etat_Valide', 'Ligne_Valide']), use_container_width=True)
 
-                # Option téléchargement du résultat validé
+                # Téléchargement des données validées
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    valid_df.to_excel(writer, sheet_name="Données_Validées", index=False)
+                    valid_df.drop(columns=['OP_Valide', 'Etat_Valide', 'Ligne_Valide']).to_excel(writer, index=False, sheet_name="Données_Validées")
                 output.seek(0)
-                st.download_button("⬇️ Télécharger données validées", output, "Données_Validées.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                st.download_button("⬇️ Télécharger les données validées", 
+                                 output, 
+                                 "Données_Validées.xlsx",
+                                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
             else:
-                st.error("❌ Impossible de trouver les colonnes **OP** et **Etat** dans le fichier importé.")
+                st.error("❌ Impossible de trouver les colonnes OP et Etat.")
+                st.info("Noms attendus pour OP : OP, op, operation, code op\nNoms attendus pour Etat : Etat, etat, état, state, status")
 
         # ====================== STATISTIQUES (Excel + Instances) ======================
+        st.divider()
         all_motifs = pd.Series(dtype=str)
 
         motif_col = find_column(motif_df, ['detail motif', 'détail motif', 'motif', 'pc mauvais'])
-        if motif_col and motif_col in motif_df.columns:
+        if motif_col:
             all_motifs = pd.concat([all_motifs, motif_df[motif_col].astype(str).str.strip()])
 
         if not st.session_state.instances.empty:
@@ -196,39 +224,26 @@ elif page == "📊 RAPPORTS":
         all_motifs = all_motifs[(all_motifs != "") & (all_motifs != "nan") & (all_motifs != "None")]
         motif_count = all_motifs.value_counts().head(15)
 
-        # KPIs
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Total Commandes", len(etat_df))
         col2.metric("Total Motifs", len(all_motifs))
         col3.metric("Instances saisies", len(st.session_state.instances))
         col4.metric("Motifs uniques", len(motif_count))
 
-        st.divider()
-
         if not motif_count.empty:
             st.subheader("📊 Top 15 des Motifs")
-            fig_bar = px.bar(x=motif_count.index, y=motif_count.values,
-                             title="Top 15 Motifs (Excel + Instances)",
-                             labels={"x": "Motif", "y": "Nombre"}, text=motif_count.values)
-            fig_bar.update_layout(xaxis_tickangle=-45, height=550, margin=dict(b=200))
-            st.plotly_chart(fig_bar, use_container_width=True)
+            fig = px.bar(x=motif_count.index, y=motif_count.values, title="Top 15 Motifs", text=motif_count.values)
+            fig.update_layout(xaxis_tickangle=-45, height=550)
+            st.plotly_chart(fig, use_container_width=True)
 
             st.subheader("🥧 Répartition des Motifs")
-            top10 = all_motifs.value_counts().head(10)
-            fig_pie = px.pie(names=top10.index, values=top10.values, title="Répartition en %")
-            fig_pie.update_traces(textinfo='percent+label')
+            fig_pie = px.pie(names=motif_count.index[:10], values=motif_count.values[:10], title="Répartition en %")
             st.plotly_chart(fig_pie, use_container_width=True)
 
-            st.dataframe(motif_count.reset_index().rename(columns={"index": "Motif", "count": "Nombre"}), use_container_width=True)
-        else:
-            st.warning("Aucun motif disponible pour le moment.")
-
     except Exception as e:
-        st.error(f"❌ Erreur lors du chargement des données : {str(e)}")
-        st.info("Vérifiez que les fichiers ETAT FTTH RTC RTCL.xlsx et MOTIF TOTAL (1).xlsx sont présents.")
+        st.error(f"❌ Erreur générale : {str(e)}")
 
-# ====================== AUTRES PAGES ======================
 else:
     st.info(f"Page **{page}** est en cours de développement.")
 
-st.caption(f"Application Gestion Chantier MHAMID | Connecté en tant que **{st.session_state.username}**")
+st.caption(f"Application Gestion Chantier MHAMID | Connecté en tant que **{st.session_state.get('username', 'admin')}**")

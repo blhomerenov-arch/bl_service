@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import plotly.express as px
-import io  # ← Ajouté ici
+import io
 
 st.set_page_config(page_title="Gestion Chantier MHAMID", layout="wide")
 
@@ -16,7 +16,7 @@ if not st.session_state.authenticated:
     password = st.text_input("Mot de passe", type="password")
    
     if st.button("Se connecter"):
-        if username == "admin" and password == "1234":  # Change le mot de passe !
+        if username == "admin" and password == "1234":
             st.session_state.authenticated = True
             st.success("Connexion réussie !")
             st.rerun()
@@ -28,7 +28,6 @@ if not st.session_state.authenticated:
 st.markdown("""
     <style>
     .header {background-color: #0E7CFF; color: white; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px;}
-    .success {background-color: #d4edda; padding: 12px; border-radius: 8px;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -66,7 +65,7 @@ if page == "📝 INSTANCES":
     with st.form("saisie_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         with col1:
-            demande = st.text_input("Demande*", placeholder="000D740B", help="Numéro de la demande")
+            demande = st.text_input("Demande*", placeholder="000D740B")
             nom = st.text_input("Nom du client")
             contact = st.text_input("Contact")
             adresse = st.text_area("Adresse", height=100)
@@ -84,9 +83,7 @@ if page == "📝 INSTANCES":
         if motif == "Autre":
             motif = st.text_input("Précisez le motif *")
 
-        submitted = st.form_submit_button("✅ Valider et Enregistrer", type="primary", use_container_width=True)
-
-        if submitted:
+        if st.form_submit_button("✅ Valider et Enregistrer", type="primary", use_container_width=True):
             if demande and telecopie and motif:
                 new_row = pd.DataFrame([{
                     "Demande": demande,
@@ -100,39 +97,26 @@ if page == "📝 INSTANCES":
                     "Motif": motif,
                     "Date Saisie": datetime.now()
                 }])
-                
                 st.session_state.instances = pd.concat([st.session_state.instances, new_row], ignore_index=True)
-                
                 st.success(f"✅ Motif enregistré pour la demande **{demande}**")
                 st.balloons()
             else:
                 st.error("❌ Les champs Demande, Téléscopie et Motif sont obligatoires")
 
-    # Affichage des instances saisies
-    st.subheader("📋 Instances saisies aujourd’hui")
+    st.subheader("📋 Instances saisies")
     if not st.session_state.instances.empty:
-        st.dataframe(st.session_state.instances, use_container_width=True, height=400)
-        
-        # Option d'export des instances saisies
+        st.dataframe(st.session_state.instances, use_container_width=True)
         csv = st.session_state.instances.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="⬇️ Télécharger les instances (CSV)",
-            data=csv,
-            file_name=f"instances_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv"
-        )
+        st.download_button("⬇️ Télécharger Instances (CSV)", csv, f"instances_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
     else:
         st.info("Aucune instance saisie pour le moment.")
 
-    st.divider()
-
-    # Chargement du fichier Excel existant
-    st.subheader("📂 Fichier de référence")
     try:
         df = pd.read_excel("ETAT FTTH RTC RTCL.xlsx", sheet_name="SITUATION14.15")
-        st.dataframe(df, use_container_width=True, height=500)
-    except Exception as e:
-        st.warning("Impossible de charger le fichier **ETAT FTTH RTC RTCL.xlsx**. Vérifie qu’il est dans le même dossier.")
+        st.subheader("📂 Fichier de référence")
+        st.dataframe(df, use_container_width=True, height=400)
+    except:
+        st.warning("Impossible de charger ETAT FTTH RTC RTCL.xlsx")
 
 # ====================== PAGE RAPPORTS ======================
 elif page == "📊 RAPPORTS":
@@ -142,59 +126,56 @@ elif page == "📊 RAPPORTS":
         etat_df = pd.read_excel("ETAT FTTH RTC RTCL.xlsx", sheet_name="SITUATION14.15")
         motif_df = pd.read_excel("MOTIF TOTAL (1).xlsx", sheet_name="MOTIF")
 
-        # Détection des colonnes
-        motif_col = find_column(motif_df, ['motif', 'detail motif'])
-        secteur_col = find_column(etat_df, ['secteur', 'sector'])
-        etat_col = find_column(etat_df, ['etat', 'état', 'state'])
-        delai_col = find_column(etat_df, ['délai', 'delai', 'délai(j)'])
-
         # KPIs
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Total Commandes", len(etat_df))
         col2.metric("Total Motifs", len(motif_df))
-        col3.metric("Délai Moyen (jours)", 
-                    round(etat_df[delai_col].mean(), 1) if delai_col and delai_col in etat_df.columns else "N/A")
-        col4.metric("Commandes VA", 
-                    len(etat_df[etat_df[etat_col].astype(str).str.upper().str.strip() == 'VA']) 
-                    if etat_col else 0)
+        col3.metric("Délai Moyen", "N/A")   # À améliorer plus tard
+        col4.metric("Commandes VA", 0)
 
         st.divider()
+        st.subheader("📈 Statistiques des Motifs")
 
-        # Graphique Top Motifs
+        # Détection correcte de la colonne
+        motif_col = find_column(motif_df, ['detail motif', 'motif', 'détail motif'])
+
         if motif_col and motif_col in motif_df.columns:
-            motif_count = motif_df[motif_col].astype(str).str.strip().value_counts().head(15)
-            fig = px.bar(
-                x=motif_count.index, 
-                y=motif_count.values, 
-                title=f"Top 15 Motifs les plus fréquents",
-                labels={"x": "Motif", "y": "Nombre"}
-            )
-            fig.update_layout(xaxis_tickangle=-45, height=500)
-            st.plotly_chart(fig, use_container_width=True)
+            motif_series = motif_df[motif_col].astype(str).str.strip()
+            motif_series = motif_series[(motif_series != "") & (motif_series != "nan")]
 
-        # Export complet
-        if st.button("📄 Générer Rapport Complet"):
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                etat_df.to_excel(writer, sheet_name="Etat", index=False)
-                motif_df.to_excel(writer, sheet_name="Motifs", index=False)
-                if not st.session_state.instances.empty:
-                    st.session_state.instances.to_excel(writer, sheet_name="Instances Saisies", index=False)
-            
-            output.seek(0)
-            st.download_button(
-                label="⬇️ Télécharger le Rapport Excel",
-                data=output,
-                file_name=f"Rapport_Chantier_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            motif_count = motif_series.value_counts().head(15)
+
+            if not motif_count.empty:
+                # Graphique Barres
+                fig_bar = px.bar(
+                    x=motif_count.index,
+                    y=motif_count.values,
+                    title="Top 15 des Motifs",
+                    labels={"x": "Détail Motif", "y": "Nombre"},
+                    text=motif_count.values
+                )
+                fig_bar.update_layout(xaxis_tickangle=-45, height=550, margin=dict(b=180))
+                st.plotly_chart(fig_bar, use_container_width=True)
+
+                # Graphique Cercle (Pie)
+                st.subheader("🥧 Répartition des Motifs")
+                top10 = motif_series.value_counts().head(10)
+                fig_pie = px.pie(names=top10.index, values=top10.values, title="Répartition en %")
+                fig_pie.update_traces(textinfo='percent+label')
+                st.plotly_chart(fig_pie, use_container_width=True)
+
+                st.dataframe(motif_count.reset_index().rename(columns={"index": "Motif", "count": "Nombre"}), use_container_width=True)
+            else:
+                st.warning("La colonne DETAIL MOTIF existe mais est encore vide. Remplis quelques motifs dans ton fichier Excel.")
+        else:
+            st.error("Impossible de trouver la colonne des motifs.")
+            st.write("Colonnes disponibles :", list(motif_df.columns))
 
     except Exception as e:
-        st.error(f"❌ Erreur lors du chargement des données : {str(e)}")
-        st.info("Vérifie que les fichiers **ETAT FTTH RTC RTCL.xlsx** et **MOTIF TOTAL (1).xlsx** sont présents.")
+        st.error(f"Erreur lors du chargement des fichiers : {str(e)}")
 
 # ====================== AUTRES PAGES ======================
 else:
-    st.info(f"Page **{page}** est en cours de développement. Elle sera disponible bientôt.")
+    st.info(f"Page **{page}** est en cours de développement.")
 
-st.caption("Application de gestion de chantier MHAMID - Fibre & RTC | Connecté en tant que **admin**")
+st.caption("Application Gestion Chantier MHAMID | Connecté en tant que admin")

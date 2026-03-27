@@ -33,17 +33,16 @@ st.markdown("""
 
 st.markdown('<div class="header"><h2>🚧 Gestion Chantier Fibre & RTC - MHAMID</h2></div>', unsafe_allow_html=True)
 
-# ====================== FONCTION DÉTECTION COLONNES ======================
+# ====================== FONCTION DÉTECTION ======================
 def find_column(df, keywords):
     if df is None or df.empty:
         return None
     for col in df.columns:
-        col_str = str(col).lower()
-        if any(k in col_str for k in [k.lower() for k in keywords]):
+        if any(k.lower() in str(col).lower() for k in keywords):
             return col
     return None
 
-# ====================== INITIALISATION ======================
+# ====================== SESSION STATE ======================
 if "instances" not in st.session_state:
     st.session_state.instances = pd.DataFrame(columns=[
         "Demande", "Nom", "Contact", "Adresse", "Téléscopie", 
@@ -98,16 +97,17 @@ if page == "📝 INSTANCES":
                     "Date Saisie": datetime.now()
                 }])
                 st.session_state.instances = pd.concat([st.session_state.instances, new_row], ignore_index=True)
-                st.success(f"✅ Motif enregistré pour la demande **{demande}**")
+                st.success(f"✅ Motif enregistré pour **{demande}**")
                 st.balloons()
             else:
-                st.error("❌ Les champs Demande, Téléscopie et Motif sont obligatoires")
+                st.error("❌ Demande, Téléscopie et Motif sont obligatoires")
 
+    # Affichage des instances
     st.subheader("📋 Instances saisies")
     if not st.session_state.instances.empty:
         st.dataframe(st.session_state.instances, use_container_width=True)
         csv = st.session_state.instances.to_csv(index=False).encode('utf-8')
-        st.download_button("⬇️ Télécharger Instances (CSV)", csv, f"instances_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
+        st.download_button("⬇️ Télécharger Instances", csv, f"instances_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
     else:
         st.info("Aucune instance saisie pour le moment.")
 
@@ -118,74 +118,76 @@ if page == "📝 INSTANCES":
     except:
         st.warning("Impossible de charger ETAT FTTH RTC RTCL.xlsx")
 
-# ====================== PAGE RAPPORTS (CORRIGÉE) ======================
+# ====================== PAGE RAPPORTS ======================
 elif page == "📊 RAPPORTS":
     st.subheader("📊 Rapports et Statistiques")
 
     try:
+        # Chargement des fichiers
         etat_df = pd.read_excel("ETAT FTTH RTC RTCL.xlsx", sheet_name="SITUATION14.15")
         motif_df = pd.read_excel("MOTIF TOTAL (1).xlsx", sheet_name="MOTIF")
 
+        # ====================== COMBINAISON DES DONNÉES ======================
+        all_motifs = pd.Series(dtype=str)
+
+        # 1. Motifs venant du fichier Excel
+        motif_col = find_column(motif_df, ['detail motif', 'détail motif', 'motif', 'pc mauvais'])
+        if motif_col and motif_col in motif_df.columns:
+            excel_motifs = motif_df[motif_col].astype(str).str.strip()
+            all_motifs = pd.concat([all_motifs, excel_motifs])
+
+        # 2. Motifs venant des instances saisies dans l'app
+        if not st.session_state.instances.empty:
+            app_motifs = st.session_state.instances["Motif"].astype(str).str.strip()
+            all_motifs = pd.concat([all_motifs, app_motifs])
+
+        # Nettoyage
+        all_motifs = all_motifs[(all_motifs != "") & (all_motifs != "nan") & (all_motifs != "None")]
+        motif_count = all_motifs.value_counts().head(15)
+
+        # KPIs
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total Lignes", len(motif_df))
-        col2.metric("Colonnes", len(motif_df.columns))
+        col1.metric("Total Commandes", len(etat_df))
+        col2.metric("Total Motifs", len(all_motifs))
+        col3.metric("Motifs saisis dans l'app", len(st.session_state.instances))
+        col4.metric("Motifs uniques", len(motif_count))
 
         st.divider()
-        st.subheader("📈 Statistiques des Motifs")
 
-        # Détection intelligente de la colonne motif
-        motif_col = find_column(motif_df, ['detail motif', 'détail motif', 'motif', 'pc mauvais', 'code motif'])
+        if not motif_count.empty:
+            st.subheader("📊 Top 15 des Motifs")
+            fig_bar = px.bar(
+                x=motif_count.index,
+                y=motif_count.values,
+                title="Top 15 Motifs (Excel + Instances saisies)",
+                labels={"x": "Motif", "y": "Nombre"},
+                text=motif_count.values
+            )
+            fig_bar.update_layout(xaxis_tickangle=-45, height=550, margin=dict(b=200))
+            st.plotly_chart(fig_bar, use_container_width=True)
 
-        # Si pas trouvé, on prend la 6ème colonne (index 5)
-        if not motif_col and len(motif_df.columns) > 5:
-            motif_col = motif_df.columns[5]
-            st.info(f"✅ Colonne utilisée automatiquement : **{motif_col}**")
+            st.subheader("🥧 Répartition des Motifs")
+            top10 = all_motifs.value_counts().head(10)
+            fig_pie = px.pie(
+                names=top10.index,
+                values=top10.values,
+                title="Répartition en pourcentage"
+            )
+            fig_pie.update_traces(textinfo='percent+label')
+            st.plotly_chart(fig_pie, use_container_width=True)
 
-        if motif_col and motif_col in motif_df.columns:
-            motif_series = motif_df[motif_col].astype(str).str.strip()
-            motif_series = motif_series[(motif_series != "") & (motif_series != "nan") & (motif_series != "None")]
-
-            motif_count = motif_series.value_counts().head(15)
-
-            if not motif_count.empty:
-                # Graphique en barres
-                st.subheader("📊 Top 15 des Motifs")
-                fig_bar = px.bar(
-                    x=motif_count.index,
-                    y=motif_count.values,
-                    title=f"Top 15 Motifs - {motif_col}",
-                    labels={"x": "Motif", "y": "Nombre"},
-                    text=motif_count.values
-                )
-                fig_bar.update_layout(xaxis_tickangle=-45, height=550, margin=dict(b=200))
-                st.plotly_chart(fig_bar, use_container_width=True)
-
-                # Graphique en cercle
-                st.subheader("🥧 Répartition des Motifs")
-                top10 = motif_series.value_counts().head(10)
-                fig_pie = px.pie(
-                    names=top10.index,
-                    values=top10.values,
-                    title="Répartition en pourcentage"
-                )
-                fig_pie.update_traces(textinfo='percent+label')
-                st.plotly_chart(fig_pie, use_container_width=True)
-
-                st.dataframe(
-                    motif_count.reset_index().rename(columns={"index": "Motif", "count": "Nombre"}),
-                    use_container_width=True
-                )
-            else:
-                st.warning("La colonne des motifs existe mais est encore vide. Remplis-la dans ton fichier Excel.")
+            st.dataframe(
+                motif_count.reset_index().rename(columns={"index": "Motif", "count": "Nombre"}),
+                use_container_width=True
+            )
         else:
-            st.error("Impossible de détecter la colonne des motifs.")
-            st.write("Colonnes disponibles :", list(motif_df.columns))
+            st.warning("Aucun motif disponible pour le moment. Saisis des instances ou remplis ton fichier Excel.")
 
     except Exception as e:
-        st.error(f"Erreur de chargement des fichiers : {str(e)}")
+        st.error(f"Erreur lors du chargement des données : {str(e)}")
 
 # ====================== AUTRES PAGES ======================
 else:
     st.info(f"Page **{page}** est en cours de développement.")
 
-st.caption("Application Gestion Chantier MHAMID - Fibre & RTC | Connecté en tant que admin")
+st.caption("Application Gestion Chantier MHAMID | Connecté en tant que admin")

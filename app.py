@@ -8,9 +8,6 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-# Pour WhatsApp (Twilio) - installez avec : pip install twilio
-from twilio.rest import Client
-
 st.set_page_config(page_title="Gestion Chantier MHAMID", layout="wide")
 
 # ====================== AUTHENTIFICATION ======================
@@ -39,16 +36,11 @@ if not st.session_state.authenticated:
             st.error("❌ Identifiants incorrects.")
     st.stop()
 
-# ====================== CONFIGURATION EMAIL & WHATSAPP ======================
-# === EMAIL (Gmail recommandé) ===
-EMAIL_SENDER = "ton.email@gmail.com"                    # ← CHANGE
-EMAIL_PASSWORD = "ton16caracteresapppassword"           # ← Mot de passe d'application Gmail
-EMAIL_RECIPIENT_DEFAULT = "superviseur.mhamid@gmail.com"
-
-# === WHATSAPP (Twilio) ===
-TWILIO_ACCOUNT_SID = "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxx"   # ← Change avec tes infos Twilio
-TWILIO_AUTH_TOKEN = "xxxxxxxxxxxxxxxxxxxxxxxxxxxx"      # ← Change
-TWILIO_WHATSAPP_FROM = "whatsapp:+14155238886"          # Numéro Twilio Sandbox ou ton numéro
+# ====================== CONFIGURATION EMAIL ======================
+# ←←←←←←←←←←  CHANGE CES DEUX LIGNES  ←←←←←←←←←←
+EMAIL_SENDER = "ton.email@gmail.com"                    # Ton adresse Gmail
+EMAIL_PASSWORD = "ton_mot_de_passe_application"         # Mot de passe d'application Gmail (16 caractères)
+EMAIL_RECIPIENT_DEFAULT = "superviseur.mhamid@gmail.com"  # Email du destinataire par défaut
 
 # ====================== FONCTIONS ======================
 def find_column(df, keywords):
@@ -75,29 +67,18 @@ def send_email(subject, body, recipient):
         server.quit()
         return True
     except Exception as e:
-        st.error(f"Erreur email : {str(e)}")
+        st.error(f"❌ Erreur d'envoi email : {str(e)}")
         return False
 
-def send_whatsapp(message, to_number):
-    try:
-        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-        whatsapp_to = f"whatsapp:{to_number}" if not to_number.startswith("whatsapp:") else to_number
-        
-        client.messages.create(
-            body=message,
-            from_=TWILIO_WHATSAPP_FROM,
-            to=whatsapp_to
-        )
-        return True
-    except Exception as e:
-        st.error(f"Erreur WhatsApp : {str(e)}")
-        return False
-
-# ====================== SAUVEGARDE INSTANCES ======================
+# ====================== SAUVEGARDE AUTOMATIQUE ======================
 INSTANCES_FILE = "instances_saved.xlsx"
+
 if "instances" not in st.session_state:
     if os.path.exists(INSTANCES_FILE):
-        st.session_state.instances = pd.read_excel(INSTANCES_FILE)
+        try:
+            st.session_state.instances = pd.read_excel(INSTANCES_FILE)
+        except:
+            st.session_state.instances = pd.DataFrame(columns=["Demande", "Nom", "Contact", "Adresse", "Téléscopie", "Date Réception", "Secteur", "Agent", "Motif", "Date Saisie"])
     else:
         st.session_state.instances = pd.DataFrame(columns=["Demande", "Nom", "Contact", "Adresse", "Téléscopie", "Date Réception", "Secteur", "Agent", "Motif", "Date Saisie"])
 
@@ -106,86 +87,99 @@ def save_instances():
         st.session_state.instances.to_excel(INSTANCES_FILE, index=False)
 
 # ====================== NAVIGATION ======================
-page = st.radio("Navigation", ["📝 INSTANCES", "📊 RAPPORTS", "⚠️ DÉRANGEMENTS", "🔧 FIABILISATION", "⚖️ LITIGES"], horizontal=True)
+page = st.radio(
+    "Navigation",
+    ["📝 INSTANCES", "📊 RAPPORTS", "⚠️ DÉRANGEMENTS", "🔧 FIABILISATION", "⚖️ LITIGES"],
+    horizontal=True,
+    label_visibility="collapsed"
+)
 
 # ====================== PAGE INSTANCES ======================
 if page == "📝 INSTANCES":
     st.subheader("📝 Saisie du Motif Journalier")
-    # (Code de saisie identique à avant - je l'ai raccourci ici)
+
     with st.form("saisie_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         with col1:
             demande = st.text_input("Demande*", placeholder="000D740B")
-            nom = st.text_input("Nom")
+            nom = st.text_input("Nom du client")
             contact = st.text_input("Contact")
-            adresse = st.text_area("Adresse", height=80)
+            adresse = st.text_area("Adresse", height=100)
         with col2:
-            telecopie = st.text_input("N° Téléscopie*", placeholder="525311326")
-            date_reception = st.date_input("Date réception", datetime.now().date())
+            telecopie = st.text_input("N° de Téléscopie*", placeholder="525311326")
+            date_reception = st.date_input("Date de réception", datetime.now().date())
             secteur = st.selectbox("Secteur", ["MHAMID", "BOUAAKAZ", "Province M'HAMID"])
             agent = st.selectbox("Agent", ["hamid", "SHAKHMAN"])
 
-        motif = st.selectbox("Motif", ["Adresse erronée", "Client refuse installation", "Transport saturé", "PC saturé", "INJOINABLE", "Local fermé + injoignable", "Création PC", "ETUDE CREATION PC", "MSAN saturé", "Autre"])
+        motif = st.selectbox("Motif", [
+            "Adresse erronée", "Client refuse installation", "Transport saturé",
+            "PC saturé", "INJOINABLE", "Local fermé + injoignable",
+            "Création PC", "ETUDE CREATION PC", "MSAN saturé", "Autre"
+        ])
         if motif == "Autre":
-            motif = st.text_input("Précisez le motif")
+            motif = st.text_input("Précisez le motif *")
 
-        if st.form_submit_button("✅ Enregistrer", type="primary"):
+        if st.form_submit_button("✅ Valider et Enregistrer", type="primary", use_container_width=True):
             if demande and telecopie and motif:
-                new_row = pd.DataFrame([{"Demande": demande, "Nom": nom, "Contact": contact, "Adresse": adresse,
-                                       "Téléscopie": telecopie, "Date Réception": date_reception, "Secteur": secteur,
-                                       "Agent": agent, "Motif": motif, "Date Saisie": datetime.now()}])
+                new_row = pd.DataFrame([{
+                    "Demande": demande, "Nom": nom, "Contact": contact, "Adresse": adresse,
+                    "Téléscopie": telecopie, "Date Réception": date_reception,
+                    "Secteur": secteur, "Agent": agent, "Motif": motif,
+                    "Date Saisie": datetime.now()
+                }])
                 st.session_state.instances = pd.concat([st.session_state.instances, new_row], ignore_index=True)
                 save_instances()
-                st.success(f"✅ Enregistré pour {demande}")
+                st.success(f"✅ Motif enregistré pour **{demande}**")
                 st.balloons()
+            else:
+                st.error("❌ Les champs Demande, Téléscopie et Motif sont obligatoires.")
 
+    st.subheader("📋 Instances saisies")
     if not st.session_state.instances.empty:
         st.dataframe(st.session_state.instances, use_container_width=True)
+    else:
+        st.info("Aucune instance saisie pour le moment.")
 
 # ====================== PAGE RAPPORTS ======================
 elif page == "📊 RAPPORTS":
-    st.subheader("📊 Rapports et Envoi Notifications")
+    st.subheader("📊 Rapports et Envoi par Email")
 
-    st.subheader("📧 Email & WhatsApp - Envoi Rapide")
+    # Bouton Email pour envoyer les saisies
+    st.subheader("📧 Envoyer les Saisies par Email")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        send_type = st.radio("Type d'envoi :", 
-                           ["Installations Validées (VA)", 
-                            "Litiges / Dérangements", 
-                            "NA, RM, TL, TR (OP)", 
-                            "Motifs RDV & INJ devenus joignables"])
-    with col2:
-        recipient_email = st.text_input("Email destinataire", value=EMAIL_RECIPIENT_DEFAULT)
-        whatsapp_number = st.text_input("Numéro WhatsApp (avec +212...)", placeholder="+212612345678")
+    recipient_email = st.text_input("Adresse email du destinataire", 
+                                  value=EMAIL_RECIPIENT_DEFAULT, 
+                                  help="L'email où envoyer le rapport")
 
-    if st.button("📤 Envoyer par Email + WhatsApp", type="primary", use_container_width=True):
-        if send_type == "NA, RM, TL, TR (OP)":
-            subject = f"OP en cours - MHAMID - {datetime.now().strftime('%d/%m/%Y')}"
-            body = f"Bonjour,\n\nVoici les demandes avec OP : NA, RM, TL, TR au {datetime.now().strftime('%d/%m/%Y')}\n\nCordialement."
-            message_whatsapp = "OP en cours aujourd'hui : NA, RM, TL, TR. Merci de vérifier."
-
-        elif send_type == "Motifs RDV & INJ devenus joignables":
-            subject = f"Motifs RDV & INJ Joignables - MHAMID"
-            body = "Bonjour,\n\nLes clients avec motifs RDV et INJOINABLE sont maintenant joignables.\nVeuillez relancer l'installation."
-            message_whatsapp = "Clients RDV & INJ devenus joignables. Relancez les installations."
-
+    if st.button("📧 Envoyer les Instances Saisies par Email", type="primary", use_container_width=True):
+        if st.session_state.instances.empty:
+            st.warning("⚠️ Aucune instance à envoyer pour le moment.")
         else:
-            subject = f"Rapport {send_type} - MHAMID - {datetime.now().strftime('%d/%m/%Y')}"
-            body = f"Bonjour,\n\nRapport {send_type} du {datetime.now().strftime('%d/%m/%Y')}.\n\nCordialement."
-            message_whatsapp = f"Rapport {send_type} envoyé."
+            subject = f"Rapport des Instances Saisies - MHAMID - {datetime.now().strftime('%d/%m/%Y %H:%M')}"
 
-        email_ok = send_email(subject, body, recipient_email)
-        whatsapp_ok = send_whatsapp(message_whatsapp, whatsapp_number) if whatsapp_number else False
+            body = f"""
+Bonjour,
 
-        if email_ok:
-            st.success("✅ Email envoyé avec succès !")
-        if whatsapp_ok:
-            st.success("✅ Message WhatsApp envoyé avec succès !")
+Voici le rapport des instances saisies aujourd'hui ({datetime.now().strftime('%d/%m/%Y')}) :
 
-    st.info("⚠️ Configure EMAIL_SENDER, EMAIL_PASSWORD et Twilio dans le code avant utilisation.")
+Nombre total d'instances : {len(st.session_state.instances)}
+
+Détails des saisies :
+{st.session_state.instances.to_string(index=False)}
+
+Cordialement,
+Application Gestion Chantier MHAMID
+"""
+
+            if send_email(subject, body, recipient_email):
+                st.success(f"✅ Email envoyé avec succès à {recipient_email} !")
+                st.balloons()
+            else:
+                st.error("❌ Échec de l'envoi de l'email. Vérifiez la configuration Gmail.")
+
+    st.info("💡 Pense à configurer EMAIL_SENDER et EMAIL_PASSWORD dans le code avant d'envoyer.")
 
 else:
-    st.info(f"Page **{page}** en cours de développement.")
+    st.info(f"Page **{page}** est en cours de développement.")
 
-st.caption(f"Application MHAMID | Connecté : **{st.session_state.get('username', 'admin')}**")
+st.caption(f"Application Gestion Chantier MHAMID | Connecté en tant que **{st.session_state.get('username', 'admin')}**")

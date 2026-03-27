@@ -8,6 +8,7 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+# Configuration de la page
 st.set_page_config(page_title="Gestion Chantier MHAMID", layout="wide")
 
 # ====================== AUTHENTIFICATION ======================
@@ -37,10 +38,17 @@ if not st.session_state.authenticated:
     st.stop()
 
 # ====================== CONFIGURATION EMAIL ======================
-# ←←←←←←←←←←  CHANGE CES DEUX LIGNES  ←←←←←←←←←←
-EMAIL_SENDER = "ton.email@gmail.com"                    # Ton adresse Gmail
-EMAIL_PASSWORD = "ton_mot_de_passe_application"         # Mot de passe d'application Gmail (16 caractères)
-EMAIL_RECIPIENT_DEFAULT = "superviseur.mhamid@gmail.com"  # Email du destinataire par défaut
+# Les valeurs par défaut peuvent être modifiées via l'interface ou le code
+INSTANCES_FILE = "instances_saved.xlsx"
+
+# Création d'un expander pour configurer les emails sans toucher au code
+with st.expander("⚙️ Configuration Email (Admin Only)", expanded=False):
+    col_conf1, col_conf2 = st.columns(2)
+    with col_conf1:
+        EMAIL_SENDER = st.text_input("Email Expediteur (Gmail)", value="ton.email@gmail.com")
+        EMAIL_PASSWORD = st.text_input("Mot de passe App Gmail", type="password", value="ton_mot_de_passe_app")
+    with col_conf2:
+        EMAIL_RECIPIENT_DEFAULT = st.text_input("Email Destinataire Par Défaut", value="superviseur.mhamid@gmail.com")
 
 # ====================== FONCTIONS ======================
 def find_column(df, keywords):
@@ -71,26 +79,40 @@ def send_email(subject, body, recipient):
         return False
 
 # ====================== SAUVEGARDE AUTOMATIQUE ======================
-INSTANCES_FILE = "instances_saved.xlsx"
-
 if "instances" not in st.session_state:
     if os.path.exists(INSTANCES_FILE):
         try:
+            # Lecture du fichier Excel existant
             st.session_state.instances = pd.read_excel(INSTANCES_FILE)
-        except:
+            # Conversion des dates en string pour éviter les conflits de types
+            if 'Date Réception' in st.session_state.instances.columns:
+                st.session_state.instances['Date Réception'] = pd.to_datetime(st.session_state.instances['Date Réception']).dt.strftime('%Y-%m-%d')
+            if 'Date Saisie' in st.session_state.instances.columns:
+                st.session_state.instances['Date Saisie'] = pd.to_datetime(st.session_state.instances['Date Saisie']).dt.strftime('%Y-%m-%d %H:%M:%S')
+        except Exception as e:
+            st.warning(f"⚠️ Impossible de charger le fichier existant : {e}. Création d'une nouvelle base.")
             st.session_state.instances = pd.DataFrame(columns=["Demande", "Nom", "Contact", "Adresse", "Téléscopie", "Date Réception", "Secteur", "Agent", "Motif", "Date Saisie"])
     else:
         st.session_state.instances = pd.DataFrame(columns=["Demande", "Nom", "Contact", "Adresse", "Téléscopie", "Date Réception", "Secteur", "Agent", "Motif", "Date Saisie"])
 
 def save_instances():
-    if not st.session_state.instances.empty:
-        st.session_state.instances.to_excel(INSTANCES_FILE, index=False)
+    # Conversion des dates en string avant sauvegarde Excel
+    df_to_save = st.session_state.instances.copy()
+    if 'Date Réception' in df_to_save.columns:
+        df_to_save['Date Réception'] = df_to_save['Date Réception'].astype(str)
+    if 'Date Saisie' in df_to_save.columns:
+        df_to_save['Date Saisie'] = df_to_save['Date Saisie'].astype(str)
+    
+    try:
+        df_to_save.to_excel(INSTANCES_FILE, index=False)
+    except Exception as e:
+        st.error(f"Erreur lors de la sauvegarde du fichier : {e}")
 
 # ====================== NAVIGATION ======================
-page = st.radio(
-    "Navigation",
+st.sidebar.title("Navigation")
+page = st.sidebar.radio(
+    "",
     ["📝 INSTANCES", "📊 RAPPORTS", "⚠️ DÉRANGEMENTS", "🔧 FIABILISATION", "⚖️ LITIGES"],
-    horizontal=True,
     label_visibility="collapsed"
 )
 
@@ -120,13 +142,25 @@ if page == "📝 INSTANCES":
             motif = st.text_input("Précisez le motif *")
 
         if st.form_submit_button("✅ Valider et Enregistrer", type="primary", use_container_width=True):
-            if demande and telecopie and motif:
+            # Validation : Si "Autre" est sélectionné, le motif_texte doit être rempli
+            motif_final = motif
+            if motif == "Autre":
+                motif_final = st.session_state.get("motif_autre_temp", "") # Pas idéal dans un form, mais on gère via le text_input ci-dessus
+                
+            if demande and telecopie and motif_final:
                 new_row = pd.DataFrame([{
-                    "Demande": demande, "Nom": nom, "Contact": contact, "Adresse": adresse,
-                    "Téléscopie": telecopie, "Date Réception": date_reception,
-                    "Secteur": secteur, "Agent": agent, "Motif": motif,
-                    "Date Saisie": datetime.now()
+                    "Demande": demande,
+                    "Nom": nom,
+                    "Contact": contact,
+                    "Adresse": adresse,
+                    "Téléscopie": telecopie,
+                    "Date Réception": date_reception.strftime('%Y-%m-%d'), # Format string
+                    "Secteur": secteur,
+                    "Agent": agent,
+                    "Motif": motif_final,
+                    "Date Saisie": datetime.now().strftime('%Y-%m-%d %H:%M:%S') # Format string
                 }])
+                
                 st.session_state.instances = pd.concat([st.session_state.instances, new_row], ignore_index=True)
                 save_instances()
                 st.success(f"✅ Motif enregistré pour **{demande}**")
@@ -136,13 +170,25 @@ if page == "📝 INSTANCES":
 
     st.subheader("📋 Instances saisies")
     if not st.session_state.instances.empty:
-        st.dataframe(st.session_state.instances, use_container_width=True)
+        # Affichage inversé pour voir les dernières entrées en premier
+        st.dataframe(st.session_state.instances.iloc[::-1], use_container_width=True)
     else:
         st.info("Aucune instance saisie pour le moment.")
 
 # ====================== PAGE RAPPORTS ======================
 elif page == "📊 RAPPORTS":
     st.subheader("📊 Rapports et Envoi par Email")
+
+    # Statistiques simples
+    if not st.session_state.instances.empty:
+        st.metric("Total Instances enregistrées", len(st.session_state.instances))
+        
+        # Graphique simple des motifs (si plotly est installé)
+        try:
+            fig = px.histogram(st.session_state.instances, x="Motif", title="Répartition des Motifs")
+            st.plotly_chart(fig, use_container_width=True)
+        except:
+            pass
 
     # Bouton Email pour envoyer les saisies
     st.subheader("📧 Envoyer les Saisies par Email")
@@ -156,30 +202,38 @@ elif page == "📊 RAPPORTS":
             st.warning("⚠️ Aucune instance à envoyer pour le moment.")
         else:
             subject = f"Rapport des Instances Saisies - MHAMID - {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+            
+            # Création du corps du mail en HTML pour une meilleure lisibilité
+            body_html = """
+            <html>
+            <body>
+            <p>Bonjour,</p>
+            <p>Voici le rapport des instances saisies aujourd'hui (<strong>{date}</strong>) :</p>
+            <p>Nombre total d'instances : <strong>{count}</strong></p>
+            <br>
+            <p><u>Détails des saisies :</u></p>
+            {table}
+            <br>
+            <p>Cordialement,<br>
+            Application Gestion Chantier MHAMID</p>
+            </body>
+            </html>
+            """.format(
+                date=datetime.now().strftime('%d/%m/%Y'),
+                count=len(st.session_state.instances),
+                table=st.session_state.instances.to_html(index=False, border=1)
+            )
 
-            body = f"""
-Bonjour,
-
-Voici le rapport des instances saisies aujourd'hui ({datetime.now().strftime('%d/%m/%Y')}) :
-
-Nombre total d'instances : {len(st.session_state.instances)}
-
-Détails des saisies :
-{st.session_state.instances.to_string(index=False)}
-
-Cordialement,
-Application Gestion Chantier MHAMID
-"""
-
-            if send_email(subject, body, recipient_email):
+            if send_email(subject, body_html, recipient_email):
                 st.success(f"✅ Email envoyé avec succès à {recipient_email} !")
                 st.balloons()
             else:
                 st.error("❌ Échec de l'envoi de l'email. Vérifiez la configuration Gmail.")
 
-    st.info("💡 Pense à configurer EMAIL_SENDER et EMAIL_PASSWORD dans le code avant d'envoyer.")
+    st.info("💡 Configurez l'expéditeur et le mot de passe dans le menu déroulant en haut à droite.")
 
+# ====================== PAGES EN DÉVELOPPEMENT ======================
 else:
-    st.info(f"Page **{page}** est en cours de développement.")
+    st.info(f"🚧 Page **{page}** est en cours de développement.")
 
 st.caption(f"Application Gestion Chantier MHAMID | Connecté en tant que **{st.session_state.get('username', 'admin')}**")

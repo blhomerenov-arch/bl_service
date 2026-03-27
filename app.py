@@ -5,31 +5,55 @@ import plotly.express as px
 
 st.set_page_config(page_title="Gestion Chantier MHAMID", layout="wide")
 
+# ====================== AUTHENTIFICATION ======================
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.title("🔐 Connexion à l'application")
+    username = st.text_input("Nom d'utilisateur")
+    password = st.text_input("Mot de passe", type="password")
+    
+    if st.button("Se connecter"):
+        if username == "admin" and password == "1234":   # ← Tu peux changer le mot de passe
+            st.session_state.authenticated = True
+            st.success("Connexion réussie !")
+            st.rerun()
+        else:
+            st.error("Identifiants incorrects")
+    st.stop()  # Arrête l'exécution si non connecté
+
+# ====================== STYLE ======================
 st.markdown("""
     <style>
     .header {background-color: #0E7CFF; color: white; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 15px;}
-    .success {background-color: #d4edda; padding: 10px; border-radius: 8px; border-left: 5px solid #28a745;}
+    .success {background-color: #d4edda; padding: 12px; border-radius: 8px;}
     </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="header"><h2>Gestion Chantier Fibre & RTC - MHAMID</h2></div>', unsafe_allow_html=True)
 
-page = st.radio(
-    "Navigation",
-    ["📝 INSTANCES", "📊 RAPPORTS", "⚠️ DÉRANGEMENTS", "🔧 FIABILISATION", "⚖️ LITIGES"],
-    horizontal=True,
-    label_visibility="collapsed"
-)
-
 # ====================== FONCTION DÉTECTION COLONNES ======================
 def find_column(df, keywords):
-    if df.empty:
+    """
+    Détecte automatiquement une colonne dans un DataFrame selon une liste de mots-clés.
+    Exemple : find_column(df, ['motif', 'detail motif']) → retourne la colonne trouvée
+    """
+    if df is None or df.empty:
         return None
     for col in df.columns:
         col_str = str(col).lower()
         if any(k in col_str for k in keywords):
             return col
     return None
+
+# ====================== NAVIGATION ======================
+page = st.radio(
+    "Navigation",
+    ["📝 INSTANCES", "📊 RAPPORTS", "⚠️ DÉRANGEMENTS", "🔧 FIABILISATION", "⚖️ LITIGES"],
+    horizontal=True,
+    label_visibility="collapsed"
+)
 
 # ====================== PAGE INSTANCES ======================
 if page == "📝 INSTANCES":
@@ -49,22 +73,20 @@ if page == "📝 INSTANCES":
             secteur = st.selectbox("Secteur", ["MHAMID", "BOUAAKAZ", "Province M'HAMID"])
             agent = st.selectbox("Agent", ["hamid", "SHAKHMAN"])
 
-        motif_options = [
+        motif = st.selectbox("Motif", [
             "Adresse erronée", "Client refuse installation", "Transport saturé",
             "PC saturé", "INJOINABLE", "Local fermé + injoignable",
             "Création PC", "ETUDE CREATION PC", "MSAN saturé", "Autre"
-        ]
-        motif = st.selectbox("Motif", motif_options)
-
+        ])
         if motif == "Autre":
             motif = st.text_input("Précisez le motif")
 
-        submitted = st.form_submit_button("✅ Valider et Enregistrer", type="primary", use_container_width=True)
-
-    if submitted:
-        if demande and telecopie and motif:
-            st.success(f"✅ Motif enregistré pour la demande **{demande}**")
-            st.balloons()
+        if st.form_submit_button("✅ Valider et Enregistrer", type="primary", use_container_width=True):
+            if demande and telecopie and motif:
+                st.success(f"✅ Motif enregistré pour la demande **{demande}**")
+                st.balloons()
+            else:
+                st.error("❌ Les champs Demande, Téléscopie et Motif sont obligatoires")
 
     st.subheader("Liste des Instances")
     try:
@@ -81,55 +103,43 @@ elif page == "📊 RAPPORTS":
         etat_df = pd.read_excel("ETAT FTTH RTC RTCL.xlsx", sheet_name="SITUATION14.15")
         motif_df = pd.read_excel("MOTIF TOTAL (1).xlsx", sheet_name="MOTIF")
 
+        # Détection des colonnes
+        motif_col = find_column(motif_df, ['motif', 'detail motif'])
+        secteur_col = find_column(etat_df, ['secteur', 'sector'])
+        etat_col = find_column(etat_df, ['etat', 'état', 'state'])
+        delai_col = find_column(etat_df, ['délai', 'delai', 'délai(j)'])
+
         # KPIs
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Total Commandes", len(etat_df))
         col2.metric("Total Motifs", len(motif_df))
-
-        delai_col = find_column(etat_df, ['délai', 'delai', 'délai(j)', 'delai(j)'])
-        delai_moyen = round(etat_df[delai_col].mean(), 1) if delai_col else "N/A"
-        col3.metric("Délai Moyen (jours)", delai_moyen)
-
-        etat_col = find_column(etat_df, ['etat', 'état', 'state', 'status'])
-        va_count = len(etat_df[etat_df[etat_col].astype(str).str.upper() == 'VA']) if etat_col else 0
-        col4.metric("Commandes VA", va_count)
+        col3.metric("Délai Moyen", round(etat_df[delai_col].mean(), 1) if delai_col else "N/A")
+        col4.metric("Commandes VA", len(etat_df[etat_df[etat_col].astype(str).str.upper() == 'VA']) if etat_col else 0)
 
         st.divider()
 
-        # Motifs
-        st.subheader("Répartition des Motifs")
-        motif_col = find_column(motif_df, ['motif', 'detail motif', 'pc mauvais'])
+        # Graphiques Motifs
         if motif_col:
-            motif_series = motif_df[motif_col].astype(str).str.strip()
-            motif_series = motif_series[(motif_series != 'nan') & (motif_series != '')]
-            motif_count = motif_series.value_counts().head(15)
+            motif_count = motif_df[motif_col].astype(str).str.strip().value_counts().head(15)
+            fig = px.bar(x=motif_count.index, y=motif_count.values, title=f"Top 15 Motifs ({motif_col})")
+            fig.update_layout(xaxis_tickangle=-45)
+            st.plotly_chart(fig, use_container_width=True)
 
-            fig1 = px.bar(x=motif_count.index, y=motif_count.values, title=f"Top 15 Motifs ({motif_col})")
-            fig1.update_layout(xaxis_tickangle=-45)
-            st.plotly_chart(fig1, use_container_width=True)
-
-            fig2 = px.pie(values=motif_count.values, names=motif_count.index, title="Répartition %")
-            st.plotly_chart(fig2, use_container_width=True)
-
-        # Secteur & État
-        st.subheader("Analyse par Secteur et État")
-        col_a, col_b = st.columns(2)
-
-        with col_a:
-            secteur_col = find_column(etat_df, ['secteur', 'sector'])
-            if secteur_col:
-                fig3 = px.bar(etat_df[secteur_col].value_counts(), title="Par Secteur")
-                st.plotly_chart(fig3, use_container_width=True)
-
-        with col_b:
-            if etat_col:
-                fig4 = px.bar(etat_df[etat_col].value_counts(), title="Par État")
-                st.plotly_chart(fig4, use_container_width=True)
+        # Bouton Export
+        if st.button("📄 Exporter Rapport Complet"):
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                etat_df.to_excel(writer, sheet_name="Etat", index=False)
+                motif_df.to_excel(writer, sheet_name="Motifs", index=False)
+            output.seek(0)
+            st.download_button("⬇️ Télécharger Rapport Excel", output, "Rapport_Chantier.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     except Exception as e:
-        st.error(f"Erreur lors du chargement des données : {str(e)}")
+        st.error(f"❌ Erreur lors du chargement des données : {str(e)}")
+        st.info("Vérifiez que les fichiers Excel sont bien présents dans le repository.")
 
+# ====================== AUTRES PAGES ======================
 else:
     st.info(f"Page **{page}** en cours de développement.")
 
-st.caption("Application de gestion de chantier MHAMID - Fibre & RTC")
+st.caption("Application de gestion de chantier MHAMID - Fibre & RTC | Connecté en tant que admin")

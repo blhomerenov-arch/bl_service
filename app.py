@@ -21,7 +21,7 @@ page = st.radio(
     label_visibility="collapsed"
 )
 
-# ====================== FONCTION DÉTECTION AMÉLIORÉE ======================
+# ====================== FONCTION DÉTECTION COLONNES ======================
 def find_column(df, keywords):
     if df is None or df.empty:
         return None
@@ -29,9 +29,9 @@ def find_column(df, keywords):
         col_str = str(col).lower()
         if any(k in col_str for k in keywords):
             return col
-    # Backup : prendre la première colonne qui contient beaucoup de texte
+    # Backup : prendre la première colonne texte non vide
     for col in df.columns:
-        if df[col].dtype == "object" and df[col].notna().sum() > 20:
+        if df[col].dtype == "object" and df[col].notna().sum() > 10:
             return col
     return None
 
@@ -75,7 +75,7 @@ if page == "📝 INSTANCES":
         df = pd.read_excel("ETAT FTTH RTC RTCL.xlsx", sheet_name="SITUATION14.15")
         st.dataframe(df, use_container_width=True, height=500)
     except:
-        st.warning("Impossible de charger le fichier ETAT")
+        st.warning("Impossible de charger le fichier ETAT FTTH RTC RTCL.xlsx")
 
 # ====================== PAGE RAPPORTS ======================
 elif page == "📊 RAPPORTS":
@@ -86,7 +86,7 @@ elif page == "📊 RAPPORTS":
         motif_df = pd.read_excel("MOTIF TOTAL (1).xlsx", sheet_name="MOTIF")
 
         # Détection des colonnes
-        motif_col = find_column(motif_df, ['motif', 'detail', 'pc mauvais', 'adresse', 'refuse'])
+        motif_col = find_column(motif_df, ['motif', 'detail', 'pc mauvais'])
         secteur_col = find_column(etat_df, ['secteur', 'sector'])
         etat_col = find_column(etat_df, ['etat', 'état', 'state'])
         delai_col = find_column(etat_df, ['délai', 'delai'])
@@ -106,4 +106,26 @@ elif page == "📊 RAPPORTS":
         if motif_col:
             motif_series = motif_df[motif_col].astype(str).str.strip()
             motif_series = motif_series[(motif_series != 'nan') & (motif_series != '')]
-            motif_count = motif_series.value_counts().head(
+            motif_count = motif_series.value_counts().head(15)
+
+            st.success(f"✅ Colonne Motif détectée : **{motif_col}**")
+
+            fig1 = px.bar(x=motif_count.index, y=motif_count.values, title="Top 15 des Motifs")
+            fig1.update_layout(xaxis_tickangle=-45)
+            st.plotly_chart(fig1, use_container_width=True)
+
+            fig2 = px.pie(values=motif_count.values, names=motif_count.index, title="Répartition des Motifs")
+            st.plotly_chart(fig2, use_container_width=True)
+
+        # Secteur
+        if secteur_col:
+            fig3 = px.bar(etat_df[secteur_col].value_counts(), title="Commandes par Secteur")
+            st.plotly_chart(fig3, use_container_width=True)
+
+    except Exception as e:
+        st.error(f"Erreur lors du chargement : {str(e)}")
+
+else:
+    st.info(f"Page **{page}** en cours de développement.")
+
+st.caption("Application MHAMID - Fibre & RTC")

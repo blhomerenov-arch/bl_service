@@ -8,6 +8,7 @@ st.set_page_config(page_title="Gestion Chantier MHAMID", layout="wide")
 st.markdown("""
     <style>
     .header {background-color: #0E7CFF; color: white; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 15px;}
+    .success {background-color: #d4edda; padding: 12px; border-radius: 8px;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -20,12 +21,17 @@ page = st.radio(
     label_visibility="collapsed"
 )
 
-# ====================== FONCTION DÉTECTION COLONNES ======================
+# ====================== FONCTION DÉTECTION AMÉLIORÉE ======================
 def find_column(df, keywords):
     if df is None or df.empty:
         return None
     for col in df.columns:
-        if any(k in str(col).lower() for k in keywords):
+        col_str = str(col).lower()
+        if any(k in col_str for k in keywords):
+            return col
+    # Backup : prendre la première colonne qui contient beaucoup de texte
+    for col in df.columns:
+        if df[col].dtype == "object" and df[col].notna().sum() > 20:
             return col
     return None
 
@@ -69,24 +75,35 @@ if page == "📝 INSTANCES":
         df = pd.read_excel("ETAT FTTH RTC RTCL.xlsx", sheet_name="SITUATION14.15")
         st.dataframe(df, use_container_width=True, height=500)
     except:
-        st.warning("Impossible de charger le fichier ETAT FTTH RTC RTCL.xlsx")
+        st.warning("Impossible de charger le fichier ETAT")
 
 # ====================== PAGE RAPPORTS ======================
 elif page == "📊 RAPPORTS":
     st.subheader("📊 Rapports et Statistiques")
+
     try:
         etat_df = pd.read_excel("ETAT FTTH RTC RTCL.xlsx", sheet_name="SITUATION14.15")
         motif_df = pd.read_excel("MOTIF TOTAL (1).xlsx", sheet_name="MOTIF")
 
-        st.write("**Colonnes dans ETAT :**", etat_df.columns.tolist())
-        st.write("**Colonnes dans MOTIF TOTAL :**", motif_df.columns.tolist())
+        # Détection des colonnes
+        motif_col = find_column(motif_df, ['motif', 'detail', 'pc mauvais', 'adresse', 'refuse'])
+        secteur_col = find_column(etat_df, ['secteur', 'sector'])
+        etat_col = find_column(etat_df, ['etat', 'état', 'state'])
+        delai_col = find_column(etat_df, ['délai', 'delai'])
 
-        st.info("Si tu vois les colonnes ci-dessus, dis-moi lesquelles apparaissent pour que je puisse améliorer la détection.")
+        st.success("✅ Fichiers chargés avec succès")
 
-    except Exception as e:
-        st.error(f"Erreur de chargement : {str(e)}")
+        # KPIs
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total Commandes", len(etat_df))
+        col2.metric("Total Motifs", len(motif_df))
+        col3.metric("Délai Moyen", round(etat_df[delai_col].mean(), 1) if delai_col else "N/A")
+        col4.metric("Commandes VA", len(etat_df[etat_df[etat_col].astype(str).str.upper() == 'VA']) if etat_col else 0)
 
-else:
-    st.info(f"Page **{page}** en cours de développement.")
+        st.divider()
 
-st.caption("Application MHAMID - Version sans login temporaire")
+        # Graphique Motifs
+        if motif_col:
+            motif_series = motif_df[motif_col].astype(str).str.strip()
+            motif_series = motif_series[(motif_series != 'nan') & (motif_series != '')]
+            motif_count = motif_series.value_counts().head(

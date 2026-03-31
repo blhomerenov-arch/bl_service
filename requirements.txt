@@ -1,8 +1,5 @@
-# Créer/Écraser le fichier
-cat > requirements.txt << EOF
-streamlit>=1.28.0
-pandas>=2.0.0
-openpyxl>=3.1.0
-plotly>=5.17.0
-numpy>=1.24.0
-EOF
+streamlit==1.28.0
+pandas==2.0.3
+openpyxl==3.1.2
+plotly==5.17.0
+numpy==1.24.3

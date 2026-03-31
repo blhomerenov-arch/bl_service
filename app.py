@@ -376,7 +376,7 @@ def generer_graphiques_avances(df):
 
 # ====================== SIDEBAR ======================
 with st.sidebar:
-    st.image("https://via.placeholder.com/150x50/0E7CFF/FFFFFF?text=MHAMID", use_container_width=True)
+   st.image("https://via.placeholder.com/150x50/0E7CFF/FFFFFF?text=MHAMID", use_column_width=True)
     st.markdown("---")
     
     page = st.radio(
@@ -475,7 +475,7 @@ if page == "🏠 DASHBOARD":
                     title="📈 Évolution Instances",
                     markers=True
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_column_width=True)
         
         with col_g2:
             if not df_derangements.empty and 'Date' in df_derangements.columns:
@@ -490,7 +490,7 @@ if page == "🏠 DASHBOARD":
                     title="📈 Évolution Dérangements",
                     markers=True
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_column_width=True)
     
     with tab2:
         col_r1, col_r2 = st.columns(2)
@@ -504,7 +504,7 @@ if page == "🏠 DASHBOARD":
                     title="🥧 Top 10 Motifs Instances",
                     hole=0.4
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_column_width=True)
         
         with col_r2:
             if not df_derangements.empty and 'Type_Derangement' in df_derangements.columns:
@@ -514,8 +514,7 @@ if page == "🏠 DASHBOARD":
                     y=type_count.index,
                     orientation='h',
                     title="📊 Types de Dérangements"
-                )
-                st.plotly_chart(fig, use_container_width=True)
+                )use_column_widthuse_column_width=True)
     
     with tab3:
         # Analyse par secteur et agent
@@ -531,8 +530,7 @@ if page == "🏠 DASHBOARD":
                         title="🗺️ Instances par Secteur",
                         color=secteur_count.values,
                         color_continuous_scale='Blues'
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+                    )use_column_widthuse_column_width=True)
             
             with col_a2:
                 if 'Agent' in df_instances.columns:
@@ -544,7 +542,7 @@ if page == "🏠 DASHBOARD":
                         color=agent_count.values,
                         color_continuous_scale='Viridis'
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_column_width=True)
     
     # Alertes et Notifications
     st.markdown("---")
@@ -614,9 +612,9 @@ elif page == "📝 INSTANCES":
         
         col_submit1, col_submit2 = st.columns([3, 1])
         with col_submit1:
-            submitted = st.form_submit_button("✅ Valider et Enregistrer", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("✅ Valider et Enregistrer", type="primary", use_column_width=True)
         with col_submit2:
-            clear = st.form_submit_button("🗑️ Effacer", use_container_width=True)
+            clear = st.form_submit_button("🗑️ Effacer", use_column_width=True)
 
         if submitted:
             if demande and telecopie and motif:
@@ -698,7 +696,7 @@ elif page == "📝 INSTANCES":
 
         st.dataframe(
             df_filtre.sort_values('Date', ascending=False) if 'Date' in df_filtre.columns else df_filtre,
-            use_container_width=True,
+            use_column_width=True,
             height=400
         )
         
@@ -711,7 +709,7 @@ elif page == "📝 INSTANCES":
                 "📥 Télécharger Excel",
                 excel_data,
                 f"instances_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                use_container_width=True
+                use_column_width=True
             )
         
         with col_exp3:
@@ -720,11 +718,11 @@ elif page == "📝 INSTANCES":
                 "📥 Télécharger CSV",
                 csv,
                 f"instances_{datetime.now().strftime('%Y%m%d')}.csv",
-                use_container_width=True
+                use_column_width=True
             )
         
         with col_exp4:
-            if st.button("📧 Envoyer par Email", use_container_width=True):
+            if st.button("📧 Envoyer par Email", use_column_width=True):
                 config = charger_config_email()
                 if config.get("emails_destinataires"):
                     stats = {
@@ -822,7 +820,7 @@ elif page == "📊 RAPPORTS":
                         yaxis_title="Nombre de commandes",
                         hovermode='x unified'
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_column_width=True)
                     
                     # Statistiques de tendance
                     col_t1, col_t2, col_t3 = st.columns(3)
@@ -877,7 +875,7 @@ elif page == "📊 RAPPORTS":
                             color_continuous_scale='Blues'
                         )
                         fig1.update_layout(xaxis_tickangle=-45)
-                        st.plotly_chart(fig1, use_container_width=True)
+                        st.plotly_chart(fig1, use_column_width=True)
 
                     with col_chart2:
                         fig2 = px.pie(
@@ -886,7 +884,7 @@ elif page == "📊 RAPPORTS":
                             title="📊 Répartition",
                             hole=0.4
                         )
-                        st.plotly_chart(fig2, use_container_width=True)
+                        st.plotly_chart(fig2, use_column_width=True)
 
                     # Tableau détaillé
                     st.subheader("📋 Détails des Motifs")
@@ -896,7 +894,7 @@ elif page == "📊 RAPPORTS":
                         'Pourcentage': (motif_count.values / motif_count.sum() * 100).round(2),
                         'Cumul %': (motif_count.values / motif_count.sum() * 100).cumsum().round(2)
                     })
-                    st.dataframe(df_motifs_detail, use_container_width=True)
+                    st.dataframe(df_motifs_detail, use_column_width=True)
 
                     # Export avec email
                     col_exp1, col_exp2, col_exp3 = st.columns(3)
@@ -906,10 +904,10 @@ elif page == "📊 RAPPORTS":
                             "📥 Télécharger",
                             excel_motifs,
                             f"analyse_motifs_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                            use_container_width=True
+                            use_column_width=True
                         )
                     with col_exp3:
-                        if st.button("📧 Envoyer", key="email_motifs", use_container_width=True):
+                        if st.button("📧 Envoyer", key="email_motifs", use_column_width=True):
                             config = charger_config_email()
                             if config.get("emails_destinataires"):
                                 stats = {
@@ -957,7 +955,7 @@ elif page == "📊 RAPPORTS":
                             color=secteur_count.values,
                             color_continuous_scale='Viridis'
                         )
-                        st.plotly_chart(fig3, use_container_width=True)
+                        st.plotly_chart(fig3, use_column_width=True)
                     
                     with col_sect2:
                         fig4 = px.pie(
@@ -965,7 +963,7 @@ elif page == "📊 RAPPORTS":
                             names=secteur_count.index,
                             title="🥧 Répartition Géographique"
                         )
-                        st.plotly_chart(fig4, use_container_width=True)
+                        st.plotly_chart(fig4, use_column_width=True)
 
                     # Analyse détaillée par secteur
                     st.subheader("📊 Analyse Détaillée par Secteur")
@@ -984,7 +982,7 @@ elif page == "📊 RAPPORTS":
                         col_s3.metric("Délai Min", f"{df_secteur[delai_col].min():.0f}j")
                         col_s4.metric("Délai Max", f"{df_secteur[delai_col].max():.0f}j")
                     
-                    st.dataframe(df_secteur.head(100), use_container_width=True, height=300)
+                    st.dataframe(df_secteur.head(100), use_column_width=True, height=300)
         
         except Exception as e:
             st.error(f"❌ Erreur: {str(e)}")
@@ -1014,7 +1012,7 @@ elif page == "📊 RAPPORTS":
                     title="Distribution par Jour de la Semaine",
                     labels={'x': 'Jour', 'y': 'Nombre'}
                 )
-                st.plotly_chart(fig_jour, use_container_width=True)
+                st.plotly_chart(fig_jour, use_column_width=True)
             
             with col_stat2:
                 st.markdown("### 📈 Tendances")
@@ -1053,7 +1051,7 @@ elif page == "📊 RAPPORTS":
                         line=dict(dash='dash')
                     ))
                     
-                    st.plotly_chart(fig_trend, use_container_width=True)
+                    st.plotly_chart(fig_trend, use_column_width=True)
             
             # Heatmap d'activité
             st.markdown("### 🔥 Heatmap d'Activité")
@@ -1081,7 +1079,7 @@ elif page == "📊 RAPPORTS":
                     xaxis_title="Heure",
                     yaxis_title="Jour"
                 )
-                st.plotly_chart(fig_heat, use_container_width=True)
+                st.plotly_chart(fig_heat, use_column_width=True)
         else:
             st.info("ℹ️ Pas assez de données pour les analytics avancés")
 
@@ -1400,7 +1398,7 @@ elif page == "📥 IMPORT/EXPORT":
                     df_import = sheets[sheet_name]
                     
                     st.markdown(f"**Aperçu des données ({len(df_import)} lignes)**")
-                    st.dataframe(df_import.head(10), use_container_width=True)
+                    st.dataframe(df_import.head(10), use_column_width=True)
                     
                     # Options d'import
                     col_opt1, col_opt2 = st.columns(2)
@@ -1475,7 +1473,7 @@ elif page == "📥 IMPORT/EXPORT":
                     f"📥 {nom}",
                     excel_template,
                     f"template_{nom}.xlsx",
-                    use_container_width=True
+                    use_column_width=True
                 )
     
     with tab2:
@@ -1526,11 +1524,11 @@ elif page == "📥 IMPORT/EXPORT":
                             "📥 Télécharger l'Export",
                             excel_data,
                             nom_fichier,
-                            use_container_width=True
+                            use_column_width=True
                         )
                     
                     with col_download2:
-                        if st.button("📧 Envoyer par Email", use_container_width=True):
+                        if st.button("📧 Envoyer par Email", use_column_width=True):
                             config = charger_config_email()
                             if config.get("emails_destinataires"):
                                 corps = f"<h2>📤 Export de Données</h2><p>Veuillez trouver ci-joint l'export des données MHAMID.</p>"
@@ -1569,7 +1567,7 @@ elif page == "📥 IMPORT/EXPORT":
                         f"📥 {nom}\n({len(df)} lignes)",
                         excel_data,
                         f"{nom}_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                        use_container_width=True,
+                        use_column_width=True,
                         key=f"quick_export_{nom}"
                     )
                 else:

@@ -34,39 +34,83 @@ MOTIF_SHEET = "MOTIF"
 
 
 # =========================================================
-# STYLE
+# STYLE ULTRA PROFESSIONNEL
 # =========================================================
 st.markdown(
     """
     <style>
+    [data-testid="stAppViewContainer"] {
+        background:
+            radial-gradient(circle at top left, rgba(14,124,255,0.18), transparent 30%),
+            radial-gradient(circle at top right, rgba(0,191,166,0.14), transparent 28%),
+            linear-gradient(135deg, #f4f8ff 0%, #eef4fb 45%, #e8eef7 100%);
+    }
+
+    [data-testid="stHeader"] {
+        background: rgba(255,255,255,0.55);
+        backdrop-filter: blur(8px);
+    }
+
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0c2340 0%, #123b68 100%);
+    }
+
+    [data-testid="stSidebar"] * {
+        color: white !important;
+    }
+
+    .block-container {
+        padding-top: 1.2rem;
+        padding-bottom: 2rem;
+    }
+
     .main-header {
-        background: linear-gradient(90deg, #0E7CFF, #0A58CA);
+        background: linear-gradient(120deg, #0E7CFF 0%, #1565C0 55%, #00A7B5 100%);
         color: white;
-        padding: 20px;
-        border-radius: 14px;
+        padding: 22px;
+        border-radius: 18px;
         text-align: center;
-        margin-bottom: 12px;
+        margin-bottom: 16px;
+        box-shadow: 0 10px 28px rgba(13, 71, 161, 0.20);
     }
-    .card-box {
-        background-color: #f8f9fa;
-        border: 1px solid #e9ecef;
-        border-radius: 12px;
-        padding: 14px;
-        margin-bottom: 12px;
+
+    .glass-card {
+        background: rgba(255,255,255,0.88);
+        border: 1px solid rgba(255,255,255,0.55);
+        backdrop-filter: blur(10px);
+        border-radius: 16px;
+        padding: 16px;
+        margin-bottom: 14px;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
     }
+
     .wa-button a {
         display: inline-block;
         width: 100%;
         text-align: center;
-        padding: 10px 14px;
-        background: #25D366;
+        padding: 11px 14px;
+        background: linear-gradient(135deg, #25D366, #128C7E);
         color: white !important;
         text-decoration: none !important;
-        border-radius: 10px;
+        border-radius: 12px;
         font-weight: 700;
+        box-shadow: 0 8px 20px rgba(37, 211, 102, 0.28);
     }
-    .small-muted {
-        color: #6c757d;
+
+    .info-chip {
+        display: inline-block;
+        padding: 6px 10px;
+        margin: 2px 6px 2px 0;
+        border-radius: 999px;
+        background: #eef5ff;
+        border: 1px solid #dbeafe;
+        color: #0f172a;
+        font-size: 12px;
+        font-weight: 600;
+    }
+
+    .muted {
+        color: #64748b;
         font-size: 13px;
     }
     </style>
@@ -89,12 +133,6 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
-def normalize_text(value):
-    value = "" if value is None else str(value)
-    value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("utf-8")
-    return value.lower().strip()
-
-
 def now_str():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -103,7 +141,13 @@ def generate_instance_id():
     return datetime.now().strftime("%Y%m%d%H%M%S%f")
 
 
-def clean_phone_for_whatsapp(phone):
+def normalize_text(value):
+    value = "" if value is None else str(value)
+    value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("utf-8")
+    return value.lower().strip()
+
+
+def clean_phone(phone):
     if phone is None:
         return ""
     return "".join(ch for ch in str(phone) if ch.isdigit())
@@ -117,6 +161,13 @@ def to_excel_bytes(df, sheet_name="Data"):
     return output.getvalue()
 
 
+def global_search(df, query):
+    if df.empty or not query:
+        return df
+    mask = df.astype(str).apply(lambda col: col.str.contains(query, case=False, na=False))
+    return df[mask.any(axis=1)]
+
+
 def safe_mean_numeric(series):
     s = pd.to_numeric(series, errors="coerce")
     if s.notna().any():
@@ -124,36 +175,11 @@ def safe_mean_numeric(series):
     return None
 
 
-def global_search(df, query):
-    if df.empty or not query:
-        return df
-
-    mask = df.astype(str).apply(lambda col: col.str.contains(query, case=False, na=False))
-    return df[mask.any(axis=1)]
-
-
-def find_column(df, keywords):
-    if df is None or df.empty:
-        return None
-
-    keywords = [normalize_text(k) for k in keywords]
-
-    for col in df.columns:
-        col_name = normalize_text(col)
-        if any(k in col_name for k in keywords):
-            return col
-
-    for col in df.columns:
-        try:
-            non_empty = (
-                df[col].astype(str).str.strip().replace("nan", "").ne("").sum()
-            )
-            if non_empty > 10:
-                return col
-        except Exception:
-            pass
-
-    return None
+def get_secret(name, default=""):
+    try:
+        return st.secrets[name]
+    except Exception:
+        return default
 
 
 @st.cache_data(show_spinner=False)
@@ -171,21 +197,60 @@ def safe_load_excel(path, sheet_name, label):
         return pd.DataFrame()
 
 
-def get_secret(name, default=""):
-    try:
-        return st.secrets[name]
-    except Exception:
-        return default
+def find_column(df, keywords):
+    if df is None or df.empty:
+        return None
+
+    normalized_keywords = [normalize_text(k) for k in keywords]
+
+    for col in df.columns:
+        col_name = normalize_text(col)
+        if any(k in col_name for k in normalized_keywords):
+            return col
+
+    for col in df.columns:
+        try:
+            non_empty = (
+                df[col].astype(str).str.strip().replace("nan", "").ne("").sum()
+            )
+            if non_empty > 10:
+                return col
+        except Exception:
+            pass
+
+    return None
+
+
+def normalize_etat_agent(value):
+    txt = normalize_text(value).replace(" ", "").replace("_", "").replace("-", "")
+    mapping = {
+        "na": "NA",
+        "nouvelleinstallation": "NA",
+        "rm": "RM",
+        "remisedeservice": "RM",
+        "remiseenservice": "RM",
+        "tr": "TR",
+        "transfert": "TR",
+        "tl": "TL",
+        "transfertlocal": "TL",
+    }
+    return mapping.get(txt, str(value).strip().upper())
 
 
 # =========================================================
-# SETTINGS / CONFIG
+# SETTINGS
 # =========================================================
 def default_settings():
     return {
         "utilisateurs": ["admin"],
-        "agents": ["hamid", "SHAKHMAN"],
         "secteurs": ["MHAMID", "BOUAAKAZ", "Province M'HAMID"],
+        "agents": ["NA", "RM", "TR", "TL"],
+        "agent_contacts": {
+            "NA": {"whatsapp": "", "email": ""},
+            "RM": {"whatsapp": "", "email": ""},
+            "TR": {"whatsapp": "", "email": ""},
+            "TL": {"whatsapp": "", "email": ""}
+        },
         "admin_username": "admin",
         "admin_password_hash": hash_password("admin123")
     }
@@ -194,6 +259,21 @@ def default_settings():
 def save_settings(data):
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def sync_agent_contacts(settings):
+    if "agent_contacts" not in settings or not isinstance(settings["agent_contacts"], dict):
+        settings["agent_contacts"] = {}
+
+    for agent in settings.get("agents", []):
+        if agent not in settings["agent_contacts"]:
+            settings["agent_contacts"][agent] = {"whatsapp": "", "email": ""}
+
+    removed = [k for k in settings["agent_contacts"].keys() if k not in settings.get("agents", [])]
+    for k in removed:
+        del settings["agent_contacts"][k]
+
+    return settings
 
 
 def load_settings():
@@ -213,6 +293,8 @@ def load_settings():
         if key not in data:
             data[key] = value
 
+    data = sync_agent_contacts(data)
+    save_settings(data)
     return data
 
 
@@ -227,6 +309,10 @@ def add_item_to_settings(settings, key, value):
 
     settings[key].append(value)
     settings[key] = sorted(settings[key], key=lambda x: x.lower())
+
+    if key == "agents":
+        settings["agent_contacts"][value] = {"whatsapp": "", "email": ""}
+
     save_settings(settings)
     return True, f"{value} ajouté avec succès."
 
@@ -245,9 +331,15 @@ def update_item_in_settings(settings, key, old_value, new_value):
     if new_value.lower() in existing_lower:
         return False, f"{new_value} existe déjà."
 
-    idx = settings[key].index(old_value)
-    settings[key][idx] = new_value
+    index = settings[key].index(old_value)
+    settings[key][index] = new_value
     settings[key] = sorted(settings[key], key=lambda x: x.lower())
+
+    if key == "agents":
+        settings["agent_contacts"][new_value] = settings["agent_contacts"].get(old_value, {"whatsapp": "", "email": ""})
+        if old_value in settings["agent_contacts"]:
+            del settings["agent_contacts"][old_value]
+
     save_settings(settings)
     return True, f"{old_value} modifié en {new_value}."
 
@@ -259,16 +351,38 @@ def delete_item_in_settings(settings, key, value):
         return False, "Élément introuvable."
 
     if len(settings[key]) <= 1:
-        return False, f"Impossible de supprimer le dernier {key[:-1] if key.endswith('s') else key}."
+        return False, "Impossible de supprimer le dernier élément."
 
     settings[key].remove(value)
+
+    if key == "agents" and value in settings["agent_contacts"]:
+        del settings["agent_contacts"][value]
+
     save_settings(settings)
     return True, f"{value} supprimé avec succès."
 
 
+def get_agent_contact(settings, agent_name):
+    contacts = settings.get("agent_contacts", {})
+    return contacts.get(agent_name, {"whatsapp": "", "email": ""})
+
+
+def update_agent_contact(settings, agent_name, whatsapp, email):
+    settings = sync_agent_contacts(settings)
+    settings["agent_contacts"][agent_name] = {
+        "whatsapp": str(whatsapp).strip(),
+        "email": str(email).strip()
+    }
+    save_settings(settings)
+    return True
+
+
+# =========================================================
+# EMAIL CONFIG
+# =========================================================
 def default_email_config():
     return {
-        "smtp_server": "smtp.gmail.com",
+        "smtp_server": "smtp.office365.com",
         "smtp_port": 587,
         "sender_email": "",
         "default_recipient": ""
@@ -311,9 +425,9 @@ def init_auth_state():
 
 
 def admin_login(settings, username, password):
-    good_user = username == settings.get("admin_username", "admin")
-    good_pass = hash_password(password) == settings.get("admin_password_hash", "")
-    if good_user and good_pass:
+    ok_user = username == settings.get("admin_username", "admin")
+    ok_pass = hash_password(password) == settings.get("admin_password_hash", "")
+    if ok_user and ok_pass:
         st.session_state["is_admin"] = True
         st.session_state["admin_user"] = username
         return True
@@ -326,7 +440,7 @@ def admin_logout():
 
 
 # =========================================================
-# DATA SAVE / LOAD
+# DATA
 # =========================================================
 def load_saved_instances():
     if SAISIES_FILE.exists():
@@ -368,22 +482,8 @@ def update_instance(instance_id, updates):
 
 
 # =========================================================
-# EMAIL
+# EMAIL HISTORY
 # =========================================================
-def send_email_smtp(config, password, to_email, subject, body):
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = config["sender_email"]
-    msg["To"] = to_email
-    msg.set_content(body)
-
-    server = smtplib.SMTP(config["smtp_server"], int(config["smtp_port"]))
-    server.starttls()
-    server.login(config["sender_email"], password)
-    server.send_message(msg)
-    server.quit()
-
-
 def load_email_history():
     if EMAIL_HISTORY_FILE.exists():
         try:
@@ -406,6 +506,23 @@ def append_email_history(record):
 
 
 # =========================================================
+# EMAIL SENDER
+# =========================================================
+def send_email_smtp(config, password, to_email, subject, body):
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = config["sender_email"]
+    msg["To"] = to_email
+    msg.set_content(body)
+
+    server = smtplib.SMTP(config["smtp_server"], int(config["smtp_port"]))
+    server.starttls()
+    server.login(config["sender_email"], password)
+    server.send_message(msg)
+    server.quit()
+
+
+# =========================================================
 # MESSAGE BUILDERS
 # =========================================================
 def build_instance_message(row):
@@ -422,20 +539,46 @@ Télécopie : {row.get('telecopie', '')}
 Date de réception : {row.get('date_reception', '')}
 Secteur : {row.get('secteur', '')}
 Agent : {row.get('agent', '')}
-Technicien : {row.get('technicien_nom', '')}
 Motif : {row.get('motif', '')}
-Utilisateur saisie : {row.get('utilisateur', '')}
+Utilisateur : {row.get('utilisateur', '')}
 
 Cordialement,
-{APP_NAME}
+InstalPro
 """.strip()
 
 
-def build_whatsapp_url(row):
-    phone = clean_phone_for_whatsapp(row.get("technicien_whatsapp", ""))
+def build_source_excel_message(row, etat_col):
+    etat_value = row.get(etat_col, "") if etat_col else ""
+    return f"""
+Bonjour,
+
+Merci de prendre en charge cette demande issue du fichier source Excel.
+
+Demande / Référence : {row.get('Demande', row.get('demande', row.get('Commande', row.get('commande', ''))))}
+Nom : {row.get('Nom', row.get('nom', ''))}
+Contact : {row.get('Contact', row.get('contact', ''))}
+Adresse : {row.get('Adresse', row.get('adresse', ''))}
+Secteur : {row.get('Secteur', row.get('secteur', ''))}
+État : {etat_value}
+
+Cordialement,
+InstalPro
+""".strip()
+
+
+def build_whatsapp_url(agent_whatsapp, row):
+    phone = clean_phone(agent_whatsapp)
     if not phone:
         return ""
     text = build_instance_message(row)
+    return f"https://wa.me/{phone}?text={quote(text)}"
+
+
+def build_source_excel_whatsapp_url(agent_whatsapp, row, etat_col):
+    phone = clean_phone(agent_whatsapp)
+    if not phone:
+        return ""
+    text = build_source_excel_message(row, etat_col)
     return f"https://wa.me/{phone}?text={quote(text)}"
 
 
@@ -448,13 +591,13 @@ def render_whatsapp_button(url):
 
 
 # =========================================================
-# RENDER HEADER
+# HEADER
 # =========================================================
 def render_header():
     if LOGO_FILE.exists():
-        c1, c2 = st.columns([1, 4])
+        c1, c2 = st.columns([1, 5])
         with c1:
-            st.image(str(LOGO_FILE), width=180)
+            st.image(str(LOGO_FILE), width=160)
         with c2:
             st.markdown(
                 f"""
@@ -476,22 +619,18 @@ def render_header():
 
 
 # =========================================================
-# ADMIN PANELS
+# ADMIN RENDER
 # =========================================================
 def render_manager_tab(settings, key, label):
     current_items = settings.get(key, [])
 
     st.markdown(f"### Gestion des {label.lower()}s")
-    if current_items:
-        st.write(current_items)
-    else:
-        st.info(f"Aucun {label.lower()}.")
+    st.write(current_items)
 
     a1, a2, a3 = st.columns(3)
 
     with a1:
         with st.form(f"add_{key}_form"):
-            st.markdown(f"**Ajouter {label.lower()}**")
             new_value = st.text_input(f"Nouveau {label.lower()}", key=f"new_{key}")
             submit = st.form_submit_button("➕ Ajouter")
             if submit:
@@ -504,7 +643,6 @@ def render_manager_tab(settings, key, label):
 
     with a2:
         with st.form(f"edit_{key}_form"):
-            st.markdown(f"**Modifier {label.lower()}**")
             old_value = st.selectbox(f"{label} à modifier", current_items, key=f"old_{key}")
             new_value = st.text_input("Nouveau nom", key=f"edit_{key}")
             submit = st.form_submit_button("✏️ Modifier")
@@ -518,7 +656,6 @@ def render_manager_tab(settings, key, label):
 
     with a3:
         with st.form(f"delete_{key}_form"):
-            st.markdown(f"**Supprimer {label.lower()}**")
             selected = st.selectbox(f"{label} à supprimer", current_items, key=f"del_{key}")
             submit = st.form_submit_button("🗑️ Supprimer")
             if submit:
@@ -528,6 +665,32 @@ def render_manager_tab(settings, key, label):
                     rerun_app()
                 else:
                     st.error(msg)
+
+
+def render_agent_contacts_admin(settings):
+    st.markdown("### Numéros WhatsApp / emails des agents")
+    if not settings.get("agents"):
+        st.info("Aucun agent disponible.")
+        return
+
+    selected_agent = st.selectbox("Agent", settings["agents"], key="contact_agent_select")
+    current = get_agent_contact(settings, selected_agent)
+
+    with st.form("agent_contact_form"):
+        whatsapp_value = st.text_input("Numéro WhatsApp de l'agent", value=current.get("whatsapp", ""))
+        email_value = st.text_input("Email de l'agent", value=current.get("email", ""))
+        submit = st.form_submit_button("💾 Enregistrer contact agent")
+        if submit:
+            update_agent_contact(settings, selected_agent, whatsapp_value, email_value)
+            st.success(f"Contact de l'agent {selected_agent} mis à jour.")
+            rerun_app()
+
+    st.markdown("#### Résumé")
+    for agent in settings["agents"]:
+        contact = get_agent_contact(settings, agent)
+        st.markdown(
+            f"- **{agent}** | WhatsApp : `{contact.get('whatsapp', '')}` | Email : `{contact.get('email', '')}`"
+        )
 
 
 # =========================================================
@@ -544,7 +707,7 @@ render_header()
 
 
 # =========================================================
-# SIDEBAR
+# SIDEBAR ADMIN
 # =========================================================
 with st.sidebar:
     st.header("Administration")
@@ -560,27 +723,42 @@ with st.sidebar:
                     rerun_app()
                 else:
                     st.error("Identifiants admin incorrects.")
-        st.caption("Identifiants par défaut : admin / admin123")
+        st.caption("Login par défaut : admin / admin123")
     else:
-        st.success(f"Connecté en admin : {st.session_state['admin_user']}")
+        st.success(f"Connecté : {st.session_state['admin_user']}")
+
         if st.button("🚪 Déconnexion admin"):
             admin_logout()
             rerun_app()
 
         st.markdown("---")
-        st.subheader("Configuration e-mail")
+        st.subheader("Configuration e-mail Outlook")
         with st.form("email_config_form"):
-            smtp_server = st.text_input("Serveur SMTP", value=email_config.get("smtp_server", "smtp.gmail.com"))
-            smtp_port = st.number_input("Port SMTP", min_value=1, max_value=9999, value=int(email_config.get("smtp_port", 587)))
-            sender_email = st.text_input("Email expéditeur", value=email_config.get("sender_email", ""))
+            smtp_server = st.text_input(
+                "Serveur SMTP",
+                value=email_config.get("smtp_server", "smtp.office365.com")
+            )
+            smtp_port = st.number_input(
+                "Port SMTP",
+                min_value=1,
+                max_value=9999,
+                value=int(email_config.get("smtp_port", 587))
+            )
+            sender_email = st.text_input(
+                "Email expéditeur",
+                value=email_config.get("sender_email", "")
+            )
+            default_recipient = st.text_input(
+                "Email destinataire par défaut",
+                value=email_config.get("default_recipient", "")
+            )
             smtp_password = st.text_input(
-                "Mot de passe / mot de passe d'application",
+                "Mot de passe SMTP",
                 type="password",
                 value=st.session_state.get("smtp_password", "")
             )
-            default_recipient = st.text_input("Destinataire par défaut", value=email_config.get("default_recipient", ""))
-            save_email_btn = st.form_submit_button("💾 Enregistrer config e-mail")
 
+            save_email_btn = st.form_submit_button("💾 Enregistrer e-mail")
             if save_email_btn:
                 save_email_config({
                     "smtp_server": smtp_server,
@@ -589,38 +767,38 @@ with st.sidebar:
                     "default_recipient": default_recipient
                 })
                 st.session_state["smtp_password"] = smtp_password
-                st.success("Configuration e-mail enregistrée.")
+                st.success("Configuration e-mail Outlook enregistrée.")
 
         st.markdown("---")
-        st.subheader("Logo Maroc Telecom")
-        uploaded_logo = st.file_uploader("Uploader le logo", type=["png", "jpg", "jpeg"])
-        c_logo1, c_logo2 = st.columns(2)
+        st.subheader("Logo")
+        uploaded_logo = st.file_uploader("Uploader le logo Maroc Telecom", type=["png", "jpg", "jpeg"])
+        lc1, lc2 = st.columns(2)
 
-        with c_logo1:
-            if st.button("💾 Enregistrer le logo"):
+        with lc1:
+            if st.button("💾 Sauvegarder logo"):
                 if uploaded_logo is not None:
                     with open(LOGO_FILE, "wb") as f:
                         f.write(uploaded_logo.getbuffer())
-                    st.success("Logo enregistré.")
+                    st.success("Logo sauvegardé.")
                     rerun_app()
                 else:
-                    st.warning("Choisis d'abord un fichier logo.")
+                    st.warning("Choisis un logo d'abord.")
 
-        with c_logo2:
-            if st.button("🗑️ Supprimer le logo"):
+        with lc2:
+            if st.button("🗑️ Supprimer logo"):
                 if LOGO_FILE.exists():
                     LOGO_FILE.unlink()
                     st.success("Logo supprimé.")
                     rerun_app()
                 else:
-                    st.info("Aucun logo enregistré.")
+                    st.info("Aucun logo à supprimer.")
 
         st.markdown("---")
         st.subheader("Sécurité admin")
         with st.form("change_admin_credentials"):
             new_admin_user = st.text_input("Nouveau nom admin", value=settings.get("admin_username", "admin"))
             new_admin_password = st.text_input("Nouveau mot de passe admin", type="password")
-            save_admin_btn = st.form_submit_button("🔑 Mettre à jour l'admin")
+            save_admin_btn = st.form_submit_button("🔑 Mettre à jour")
             if save_admin_btn:
                 if not new_admin_user.strip():
                     st.error("Le nom admin est obligatoire.")
@@ -651,14 +829,16 @@ if page == "📝 INSTANCES":
     st.subheader("Étape 1 - Saisie et enregistrement")
 
     if st.session_state["is_admin"]:
-        with st.expander("⚙️ Administration V2 : utilisateurs / agents / secteurs", expanded=False):
-            tabs = st.tabs(["Utilisateurs", "Agents", "Secteurs"])
+        with st.expander("⚙️ Administration complète", expanded=False):
+            tabs = st.tabs(["Utilisateurs", "Secteurs", "Agents", "Contacts agents"])
             with tabs[0]:
                 render_manager_tab(settings, "utilisateurs", "Utilisateur")
             with tabs[1]:
-                render_manager_tab(settings, "agents", "Agent")
-            with tabs[2]:
                 render_manager_tab(settings, "secteurs", "Secteur")
+            with tabs[2]:
+                render_manager_tab(settings, "agents", "Agent")
+            with tabs[3]:
+                render_agent_contacts_admin(settings)
 
     with st.form("instance_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
@@ -674,16 +854,7 @@ if page == "📝 INSTANCES":
             telecopie = st.text_input("N° de télécopie *", placeholder="525311326")
             date_reception = st.date_input("Date de réception", datetime.now().date())
             secteur = st.selectbox("Secteur", settings["secteurs"])
-            agent = st.selectbox("Agent", settings["agents"])
-
-        st.markdown("### Affectation technicien")
-        t1, t2, t3 = st.columns(3)
-        with t1:
-            technicien_nom = st.text_input("Nom technicien")
-        with t2:
-            technicien_whatsapp = st.text_input("WhatsApp technicien", placeholder="2126XXXXXXXX")
-        with t3:
-            technicien_email = st.text_input("Email technicien")
+            agent = st.selectbox("Agent destinataire", settings["agents"])
 
         motif_options = [
             "Adresse erronée",
@@ -705,6 +876,8 @@ if page == "📝 INSTANCES":
 
         if submit_instance:
             if demande and telecopie and motif:
+                agent_contact = get_agent_contact(settings, agent)
+
                 record = {
                     "instance_id": generate_instance_id(),
                     "date_saisie": now_str(),
@@ -717,9 +890,8 @@ if page == "📝 INSTANCES":
                     "date_reception": str(date_reception),
                     "secteur": secteur,
                     "agent": agent,
-                    "technicien_nom": technicien_nom,
-                    "technicien_whatsapp": technicien_whatsapp,
-                    "technicien_email": technicien_email,
+                    "agent_whatsapp": agent_contact.get("whatsapp", ""),
+                    "agent_email": agent_contact.get("email", ""),
                     "motif": motif,
                     "statut_etape": "Étape 1 - enregistrée",
                     "statut_email": "Non envoyé",
@@ -728,12 +900,12 @@ if page == "📝 INSTANCES":
                     "date_whatsapp": ""
                 }
                 save_instance(record)
-                st.success("Instance enregistrée. Passe maintenant à l'étape 2 pour l'envoi.")
+                st.success("Instance enregistrée avec succès. Passe à l'étape 2 pour l'envoi.")
             else:
                 st.error("Les champs Demande, Télécopie et Motif sont obligatoires.")
 
     st.markdown("---")
-    st.subheader("Étape 2 - Envoi au technicien")
+    st.subheader("Étape 2 - Envoi des instances")
 
     saved_df = load_saved_instances()
     email_history_df = load_email_history()
@@ -743,25 +915,22 @@ if page == "📝 INSTANCES":
     else:
         f1, f2, f3 = st.columns(3)
         with f1:
-            search_saved = st.text_input("Recherche", placeholder="demande, technicien, motif...")
+            search_saved = st.text_input("Recherche", placeholder="demande, agent, motif...")
         with f2:
-            selected_sector = st.selectbox(
-                "Filtre secteur",
-                ["Tous"] + sorted(saved_df["secteur"].dropna().astype(str).unique().tolist()) if "secteur" in saved_df.columns else ["Tous"]
-            )
+            sector_choices = ["Tous"]
+            if "secteur" in saved_df.columns:
+                sector_choices += sorted(saved_df["secteur"].dropna().astype(str).unique().tolist())
+            selected_sector = st.selectbox("Filtre secteur", sector_choices)
         with f3:
-            selected_email_status = st.selectbox(
-                "Filtre email",
-                ["Tous", "Non envoyé", "Envoyé"]
-            )
+            selected_agent = st.selectbox("Filtre agent", ["Tous"] + settings["agents"])
 
         filtered_saved = global_search(saved_df, search_saved).copy()
 
         if selected_sector != "Tous" and "secteur" in filtered_saved.columns:
             filtered_saved = filtered_saved[filtered_saved["secteur"].astype(str) == selected_sector]
 
-        if selected_email_status != "Tous" and "statut_email" in filtered_saved.columns:
-            filtered_saved = filtered_saved[filtered_saved["statut_email"].astype(str) == selected_email_status]
+        if selected_agent != "Tous" and "agent" in filtered_saved.columns:
+            filtered_saved = filtered_saved[filtered_saved["agent"].astype(str) == selected_agent]
 
         try:
             filtered_saved = filtered_saved.sort_values(by="date_saisie", ascending=False)
@@ -770,106 +939,125 @@ if page == "📝 INSTANCES":
 
         for _, row in filtered_saved.iterrows():
             instance_id = str(row.get("instance_id", ""))
+            agent_name = str(row.get("agent", ""))
+            agent_contact = get_agent_contact(settings, agent_name)
+            agent_whatsapp = agent_contact.get("whatsapp", "") or row.get("agent_whatsapp", "")
+            agent_email = agent_contact.get("email", "") or row.get("agent_email", "")
+
             message = build_instance_message(row)
-            wa_url = build_whatsapp_url(row)
+            wa_url = build_whatsapp_url(agent_whatsapp, row)
 
-            st.markdown('<div class="card-box">', unsafe_allow_html=True)
+            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
 
-            c1, c2, c3, c4 = st.columns([4.5, 1.4, 1.6, 1.4])
+            c1, c2, c3, c4 = st.columns([4.4, 1.5, 1.6, 1.3])
 
             with c1:
                 st.markdown(
                     f"""
 **Demande :** {row.get('demande', '')}  
-**Technicien :** {row.get('technicien_nom', '')}  
+**Agent :** {agent_name}  
 **Secteur :** {row.get('secteur', '')}  
-**Agent :** {row.get('agent', '')}  
 **Motif :** {row.get('motif', '')}  
 **Statut global :** {row.get('statut_etape', '')}
 """
                 )
+                st.markdown(
+                    f"""
+<span class="info-chip">WhatsApp agent : {agent_whatsapp or 'Non configuré'}</span>
+<span class="info-chip">Email agent : {agent_email or 'Non configuré'}</span>
+                    """,
+                    unsafe_allow_html=True
+                )
 
             with c2:
-                if st.button("📧 Envoyer e-mail", key=f"mail_{instance_id}"):
-                    current_config = load_email_config()
-                    password = st.session_state.get("smtp_password", "") or get_secret("smtp_password", "")
-                    recipient = str(row.get("technicien_email", "")).strip() or current_config.get("default_recipient", "").strip()
-                    subject = f"Nouvelle instance - {row.get('demande', '')}"
+                if st.session_state["is_admin"]:
+                    if st.button("📧 Envoyer e-mail", key=f"mail_{instance_id}"):
+                        current_config = load_email_config()
+                        password = st.session_state.get("smtp_password", "") or get_secret("smtp_password", "")
+                        recipient = agent_email.strip() or current_config.get("default_recipient", "").strip()
+                        subject = f"Nouvelle instance - {row.get('demande', '')}"
 
-                    if not current_config.get("sender_email"):
-                        st.error("Configure d'abord l'email expéditeur dans la sidebar.")
-                    elif not password:
-                        st.error("Ajoute le mot de passe e-mail dans la sidebar ou dans st.secrets.")
-                    elif not recipient:
-                        st.error("Aucun email technicien ni destinataire par défaut.")
-                    else:
-                        try:
-                            send_email_smtp(current_config, password, recipient, subject, message)
-                            update_instance(
-                                instance_id,
-                                {
-                                    "statut_email": "Envoyé",
-                                    "date_email": now_str(),
-                                    "statut_etape": "Étape 2 - e-mail envoyé"
-                                }
-                            )
-                            append_email_history(
-                                {
-                                    "timestamp": now_str(),
-                                    "instance_id": instance_id,
-                                    "demande": row.get("demande", ""),
-                                    "recipient": recipient,
-                                    "subject": subject,
-                                    "status": "SUCCESS",
-                                    "error": "",
-                                    "sent_by": st.session_state.get("admin_user", "")
-                                }
-                            )
-                            st.success(f"E-mail envoyé à {recipient}")
-                            rerun_app()
-                        except Exception as e:
-                            append_email_history(
-                                {
-                                    "timestamp": now_str(),
-                                    "instance_id": instance_id,
-                                    "demande": row.get("demande", ""),
-                                    "recipient": recipient,
-                                    "subject": subject,
-                                    "status": "ERROR",
-                                    "error": str(e),
-                                    "sent_by": st.session_state.get("admin_user", "")
-                                }
-                            )
-                            st.error(f"Erreur e-mail : {e}")
+                        if not current_config.get("sender_email"):
+                            st.error("Configure l'email expéditeur dans la sidebar admin.")
+                        elif not password:
+                            st.error("Ajoute le mot de passe SMTP dans la sidebar admin.")
+                        elif not recipient:
+                            st.error("Aucun email agent ni email destinataire par défaut.")
+                        else:
+                            try:
+                                send_email_smtp(current_config, password, recipient, subject, message)
+                                update_instance(
+                                    instance_id,
+                                    {
+                                        "statut_email": "Envoyé",
+                                        "date_email": now_str(),
+                                        "statut_etape": "Étape 2 - e-mail envoyé"
+                                    }
+                                )
+                                append_email_history(
+                                    {
+                                        "timestamp": now_str(),
+                                        "instance_id": instance_id,
+                                        "demande": row.get("demande", ""),
+                                        "agent": agent_name,
+                                        "recipient": recipient,
+                                        "subject": subject,
+                                        "status": "SUCCESS",
+                                        "error": "",
+                                        "sent_by": st.session_state.get("admin_user", "")
+                                    }
+                                )
+                                st.success(f"E-mail envoyé à {recipient}")
+                                rerun_app()
+                            except Exception as e:
+                                append_email_history(
+                                    {
+                                        "timestamp": now_str(),
+                                        "instance_id": instance_id,
+                                        "demande": row.get("demande", ""),
+                                        "agent": agent_name,
+                                        "recipient": recipient,
+                                        "subject": subject,
+                                        "status": "ERROR",
+                                        "error": str(e),
+                                        "sent_by": st.session_state.get("admin_user", "")
+                                    }
+                                )
+                                st.error(f"Erreur e-mail : {e}")
+                else:
+                    st.caption("Admin requis")
 
             with c3:
                 if wa_url:
                     st.markdown(render_whatsapp_button(wa_url), unsafe_allow_html=True)
                 else:
-                    st.caption("Pas de n° WhatsApp")
+                    st.caption("WhatsApp non configuré")
 
             with c4:
-                if st.button("✅ Marquer WA", key=f"wa_mark_{instance_id}"):
-                    update_instance(
-                        instance_id,
-                        {
-                            "statut_whatsapp": "Envoyé",
-                            "date_whatsapp": now_str(),
-                            "statut_etape": "Étape 2 - WhatsApp envoyé"
-                        }
-                    )
-                    st.success("WhatsApp marqué comme envoyé.")
-                    rerun_app()
+                if st.session_state["is_admin"]:
+                    if st.button("✅ Marquer WA", key=f"wa_mark_{instance_id}"):
+                        update_instance(
+                            instance_id,
+                            {
+                                "statut_whatsapp": "Envoyé",
+                                "date_whatsapp": now_str(),
+                                "statut_etape": "Étape 2 - WhatsApp envoyé"
+                            }
+                        )
+                        st.success("WhatsApp marqué comme envoyé.")
+                        rerun_app()
+                else:
+                    st.caption("Admin requis")
 
-            with st.expander(f"Voir le détail - {row.get('demande', '')}"):
+            with st.expander(f"Voir détail - {row.get('demande', '')}"):
                 st.text_area(
-                    "Message",
+                    "Message à envoyer",
                     value=message,
                     height=220,
                     key=f"msg_{instance_id}"
                 )
-                st.write(f"Email technicien : {row.get('technicien_email', '')}")
-                st.write(f"WhatsApp technicien : {row.get('technicien_whatsapp', '')}")
+                st.write(f"Email agent : {agent_email}")
+                st.write(f"WhatsApp agent : {agent_whatsapp}")
                 st.write(f"Statut email : {row.get('statut_email', 'Non envoyé')}")
                 st.write(f"Statut WhatsApp : {row.get('statut_whatsapp', 'Non envoyé')}")
 
@@ -881,33 +1069,146 @@ if page == "📝 INSTANCES":
 
             st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown("---")
-        st.subheader("Tableau des instances")
-        st.dataframe(filtered_saved, use_container_width=True, height=320)
-
-        ex1, ex2 = st.columns(2)
-        with ex1:
-            st.download_button(
-                "⬇️ Export CSV",
-                data=filtered_saved.to_csv(index=False).encode("utf-8"),
-                file_name="instances_enregistrees.csv",
-                mime="text/csv"
-            )
-        with ex2:
-            st.download_button(
-                "⬇️ Export Excel",
-                data=to_excel_bytes(filtered_saved, "Instances"),
-                file_name="instances_enregistrees.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
     st.markdown("---")
-    st.subheader("Données source Excel")
+    st.subheader("Données source Excel et dispatch par agent")
+
     etat_df = safe_load_excel(ETAT_FILE, ETAT_SHEET, "ETAT FTTH RTC RTCL.xlsx")
+
     if not etat_df.empty:
-        search_excel = st.text_input("Recherche dans le fichier source", placeholder="demande, secteur, état...")
-        filtered_etat = global_search(etat_df, search_excel)
-        st.dataframe(filtered_etat, use_container_width=True, height=400)
+        search_excel = st.text_input(
+            "Recherche dans le fichier source",
+            placeholder="demande, secteur, état..."
+        )
+        filtered_etat = global_search(etat_df, search_excel).copy()
+
+        etat_col = find_column(filtered_etat, ["etat", "état", "state"])
+        secteur_col = find_column(filtered_etat, ["secteur", "sector"])
+        demande_col = find_column(filtered_etat, ["demande", "commande", "reference", "référence"])
+
+        if etat_col:
+            filtered_etat["AGENT_CIBLE"] = filtered_etat[etat_col].apply(normalize_etat_agent)
+            actionable_df = filtered_etat[
+                filtered_etat["AGENT_CIBLE"].isin(["NA", "RM", "TR", "TL"])
+            ].copy()
+
+            st.markdown("### Lignes dispatchables selon la colonne État")
+
+            if actionable_df.empty:
+                st.info("Aucune ligne avec État = NA / RM / TR / TL.")
+            else:
+                max_rows = st.number_input(
+                    "Nombre de lignes à afficher",
+                    min_value=5,
+                    max_value=200,
+                    value=20,
+                    step=5
+                )
+
+                preview_df = actionable_df.head(max_rows)
+
+                for idx, row in preview_df.iterrows():
+                    agent_code = row.get("AGENT_CIBLE", "")
+                    agent_contact = get_agent_contact(settings, agent_code)
+                    agent_whatsapp = agent_contact.get("whatsapp", "")
+                    agent_email = agent_contact.get("email", "")
+                    wa_url = build_source_excel_whatsapp_url(agent_whatsapp, row, etat_col)
+
+                    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+
+                    c1, c2, c3 = st.columns([5, 1.8, 1.6])
+
+                    with c1:
+                        demande_value = row.get(demande_col, "") if demande_col else ""
+                        secteur_value = row.get(secteur_col, "") if secteur_col else ""
+                        etat_value = row.get(etat_col, "")
+
+                        st.markdown(
+                            f"""
+**Demande :** {demande_value}  
+**Secteur :** {secteur_value}  
+**État source :** {etat_value}  
+**Agent cible :** {agent_code}
+"""
+                        )
+
+                        st.markdown(
+                            f"""
+<span class="info-chip">WhatsApp agent : {agent_whatsapp or 'Non configuré'}</span>
+<span class="info-chip">Email agent : {agent_email or 'Non configuré'}</span>
+                            """,
+                            unsafe_allow_html=True
+                        )
+
+                    with c2:
+                        if st.session_state["is_admin"]:
+                            if st.button("📧 Envoyer agent", key=f"excel_email_{idx}"):
+                                current_config = load_email_config()
+                                password = st.session_state.get("smtp_password", "") or get_secret("smtp_password", "")
+                                recipient = agent_email.strip() or current_config.get("default_recipient", "").strip()
+                                subject = f"Dispatch {agent_code} - {demande_value}"
+                                message = build_source_excel_message(row, etat_col)
+
+                                if not current_config.get("sender_email"):
+                                    st.error("Configure l'email expéditeur dans la sidebar admin.")
+                                elif not password:
+                                    st.error("Ajoute le mot de passe SMTP dans la sidebar admin.")
+                                elif not recipient:
+                                    st.error("Aucun email agent ni email par défaut.")
+                                else:
+                                    try:
+                                        send_email_smtp(current_config, password, recipient, subject, message)
+                                        append_email_history(
+                                            {
+                                                "timestamp": now_str(),
+                                                "instance_id": f"excel_{idx}",
+                                                "demande": demande_value,
+                                                "agent": agent_code,
+                                                "recipient": recipient,
+                                                "subject": subject,
+                                                "status": "SUCCESS",
+                                                "error": "",
+                                                "sent_by": st.session_state.get("admin_user", "")
+                                            }
+                                        )
+                                        st.success(f"E-mail envoyé à {recipient}")
+                                    except Exception as e:
+                                        append_email_history(
+                                            {
+                                                "timestamp": now_str(),
+                                                "instance_id": f"excel_{idx}",
+                                                "demande": demande_value,
+                                                "agent": agent_code,
+                                                "recipient": recipient,
+                                                "subject": subject,
+                                                "status": "ERROR",
+                                                "error": str(e),
+                                                "sent_by": st.session_state.get("admin_user", "")
+                                            }
+                                        )
+                                        st.error(f"Erreur e-mail : {e}")
+                        else:
+                            st.caption("Admin requis")
+
+                    with c3:
+                        if wa_url:
+                            st.markdown(render_whatsapp_button(wa_url), unsafe_allow_html=True)
+                        else:
+                            st.caption("WhatsApp non configuré")
+
+                    with st.expander(f"Détail ligne Excel - {demande_value if demande_value else idx}"):
+                        st.text_area(
+                            "Message WhatsApp / Email",
+                            value=build_source_excel_message(row, etat_col),
+                            height=220,
+                            key=f"excel_msg_{idx}"
+                        )
+                        st.dataframe(pd.DataFrame([row]), use_container_width=True)
+
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown("### Tableau source complet")
+        st.dataframe(filtered_etat, use_container_width=True, height=420)
+
     else:
         st.info("Le fichier source ETAT FTTH RTC RTCL.xlsx n'a pas été chargé.")
 
@@ -929,7 +1230,7 @@ elif page == "📊 RAPPORTS":
         if saved_df.empty:
             st.info("Aucune instance saisie pour le moment.")
         else:
-            for col in ["secteur", "agent", "motif", "utilisateur", "statut_email", "statut_whatsapp", "technicien_nom"]:
+            for col in ["secteur", "agent", "motif", "utilisateur", "statut_email", "statut_whatsapp"]:
                 if col not in saved_df.columns:
                     saved_df[col] = ""
 
@@ -937,16 +1238,13 @@ elif page == "📊 RAPPORTS":
             emails_sent = int((saved_df["statut_email"].astype(str) == "Envoyé").sum())
             whatsapp_sent = int((saved_df["statut_whatsapp"].astype(str) == "Envoyé").sum())
             agents_count = saved_df["agent"].astype(str).replace("nan", "").replace("", pd.NA).dropna().nunique()
-            tech_count = saved_df["technicien_nom"].astype(str).replace("nan", "").replace("", pd.NA).dropna().nunique()
             secteurs_count = saved_df["secteur"].astype(str).replace("nan", "").replace("", pd.NA).dropna().nunique()
 
-            k1, k2, k3, k4, k5, k6 = st.columns(6)
+            k1, k2, k3, k4 = st.columns(4)
             k1.metric("Instances", total_instances)
             k2.metric("Emails envoyés", emails_sent)
             k3.metric("WhatsApp envoyés", whatsapp_sent)
-            k4.metric("Agents actifs", agents_count)
-            k5.metric("Techniciens", tech_count)
-            k6.metric("Secteurs actifs", secteurs_count)
+            k4.metric("Secteurs actifs", secteurs_count)
 
             st.markdown("---")
 
@@ -975,45 +1273,27 @@ elif page == "📊 RAPPORTS":
                     saved_df["motif"].fillna("Non renseigné").astype(str).value_counts().head(15).reset_index()
                 )
                 motif_count.columns = ["Motif", "Nombre"]
-                fig3 = px.bar(motif_count, x="Motif", y="Nombre", color="Nombre", title="Top 15 des motifs")
+                fig3 = px.bar(motif_count, x="Motif", y="Nombre", color="Nombre", title="Top 15 motifs")
                 fig3.update_layout(xaxis_tickangle=-45)
                 st.plotly_chart(fig3, use_container_width=True)
 
             with c4:
-                status_email = (
+                email_status = (
                     saved_df["statut_email"].fillna("Non renseigné").astype(str).value_counts().reset_index()
                 )
-                status_email.columns = ["Statut", "Nombre"]
-                fig4 = px.pie(status_email, values="Nombre", names="Statut", title="Répartition des statuts e-mail")
+                email_status.columns = ["Statut", "Nombre"]
+                fig4 = px.pie(email_status, values="Nombre", names="Statut", title="Statut des e-mails")
                 st.plotly_chart(fig4, use_container_width=True)
 
-            c5, c6 = st.columns(2)
-
-            with c5:
-                status_wa = (
-                    saved_df["statut_whatsapp"].fillna("Non renseigné").astype(str).value_counts().reset_index()
-                )
-                status_wa.columns = ["Statut", "Nombre"]
-                fig5 = px.pie(status_wa, values="Nombre", names="Statut", title="Répartition des statuts WhatsApp")
-                st.plotly_chart(fig5, use_container_width=True)
-
-            with c6:
-                user_count = (
-                    saved_df["utilisateur"].fillna("Non renseigné").astype(str).value_counts().reset_index()
-                )
-                user_count.columns = ["Utilisateur", "Nombre"]
-                fig6 = px.bar(user_count, x="Utilisateur", y="Nombre", color="Nombre", title="Saisies par utilisateur")
-                st.plotly_chart(fig6, use_container_width=True)
-
             st.markdown("---")
-            st.dataframe(saved_df, use_container_width=True, height=320)
+            st.dataframe(saved_df, use_container_width=True, height=340)
 
     with tabs[1]:
         st.subheader("Historique des e-mails envoyés")
         if email_history_df.empty:
             st.info("Aucun e-mail envoyé pour le moment.")
         else:
-            search_mail = st.text_input("Recherche dans l'historique e-mail", placeholder="demande, destinataire, statut...")
+            search_mail = st.text_input("Recherche historique e-mail", placeholder="demande, destinataire, agent...")
             hist_filtered = global_search(email_history_df, search_mail)
             st.dataframe(hist_filtered, use_container_width=True, height=380)
 
@@ -1043,26 +1323,26 @@ elif page == "📊 RAPPORTS":
                 etat_col = find_column(etat_df, ["etat", "état", "state"])
                 delai_col = find_column(etat_df, ["delai", "délai"])
 
-                kx1, kx2, kx3 = st.columns(3)
-                kx1.metric("Total commandes source", len(etat_df))
-                kx2.metric("Commandes VA", int((etat_df[etat_col].astype(str).str.upper() == "VA").sum()) if etat_col else 0)
-                kx3.metric("Délai moyen source", safe_mean_numeric(etat_df[delai_col]) if delai_col else "N/A")
+                x1, x2, x3 = st.columns(3)
+                x1.metric("Total commandes source", len(etat_df))
+                x2.metric("Commandes VA", int((etat_df[etat_col].astype(str).str.upper() == "VA").sum()) if etat_col else 0)
+                x3.metric("Délai moyen source", safe_mean_numeric(etat_df[delai_col]) if delai_col else "N/A")
 
                 if secteur_col:
                     secteur_source = etat_df[secteur_col].fillna("Non renseigné").astype(str).value_counts().reset_index()
                     secteur_source.columns = ["Secteur", "Nombre"]
-                    fig7 = px.bar(secteur_source, x="Secteur", y="Nombre", color="Nombre", title="Commandes source par secteur")
-                    st.plotly_chart(fig7, use_container_width=True)
+                    fig5 = px.bar(secteur_source, x="Secteur", y="Nombre", color="Nombre", title="Commandes source par secteur")
+                    st.plotly_chart(fig5, use_container_width=True)
 
             if not motif_df.empty:
                 st.markdown("### Analyse source motifs")
                 motif_col = find_column(motif_df, ["motif", "detail", "pc mauvais"])
                 if motif_col:
-                    mcount = motif_df[motif_col].fillna("Non renseigné").astype(str).value_counts().head(15).reset_index()
-                    mcount.columns = ["Motif", "Nombre"]
-                    fig8 = px.bar(mcount, x="Motif", y="Nombre", color="Nombre", title="Top 15 motifs source")
-                    fig8.update_layout(xaxis_tickangle=-45)
-                    st.plotly_chart(fig8, use_container_width=True)
+                    motif_source = motif_df[motif_col].fillna("Non renseigné").astype(str).value_counts().head(15).reset_index()
+                    motif_source.columns = ["Motif", "Nombre"]
+                    fig6 = px.bar(motif_source, x="Motif", y="Nombre", color="Nombre", title="Top 15 motifs source")
+                    fig6.update_layout(xaxis_tickangle=-45)
+                    st.plotly_chart(fig6, use_container_width=True)
 
 
 # =========================================================
@@ -1070,15 +1350,15 @@ elif page == "📊 RAPPORTS":
 # =========================================================
 elif page == "⚠️ DÉRANGEMENTS":
     st.subheader("Dérangements")
-    st.info("Page prête pour la V3.")
+    st.info("Page prête pour évolution future.")
 
 elif page == "🔧 FIABILISATION":
     st.subheader("Fiabilisation")
-    st.info("Page prête pour la V3.")
+    st.info("Page prête pour évolution future.")
 
 elif page == "⚖️ LITIGES":
     st.subheader("Litiges")
-    st.info("Page prête pour la V3.")
+    st.info("Page prête pour évolution future.")
 
 
 st.caption("InstalPro - Pilotage opérationnel des interventions Fibre & RTC")

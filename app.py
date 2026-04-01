@@ -34,7 +34,7 @@ MOTIF_SHEET = "MOTIF"
 
 
 # =========================================================
-# STYLE ULTRA PROFESSIONNEL
+# STYLE ULTRA PROFESSIONNEL + CHAMPS SIDEBAR VISIBLES
 # =========================================================
 st.markdown(
     """
@@ -55,8 +55,37 @@ st.markdown(
         background: linear-gradient(180deg, #0c2340 0%, #123b68 100%);
     }
 
-    [data-testid="stSidebar"] * {
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] .stMarkdown,
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] h1,
+    [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3,
+    [data-testid="stSidebar"] h4,
+    [data-testid="stSidebar"] h5,
+    [data-testid="stSidebar"] h6,
+    [data-testid="stSidebar"] span,
+    [data-testid="stSidebar"] div {
         color: white !important;
+    }
+
+    [data-testid="stSidebar"] input,
+    [data-testid="stSidebar"] textarea,
+    [data-testid="stSidebar"] [data-baseweb="input"] input,
+    [data-testid="stSidebar"] [data-baseweb="base-input"] input,
+    [data-testid="stSidebar"] [data-baseweb="select"] > div,
+    [data-testid="stSidebar"] [data-baseweb="base-input"] > div,
+    [data-testid="stSidebar"] [data-baseweb="textarea"] textarea {
+        background: white !important;
+        color: #0f172a !important;
+        -webkit-text-fill-color: #0f172a !important;
+        border-radius: 10px !important;
+    }
+
+    [data-testid="stSidebar"] input::placeholder,
+    [data-testid="stSidebar"] textarea::placeholder {
+        color: #64748b !important;
+        -webkit-text-fill-color: #64748b !important;
     }
 
     .block-container {
@@ -235,6 +264,47 @@ def normalize_etat_agent(value):
         "transfertlocal": "TL",
     }
     return mapping.get(txt, str(value).strip().upper())
+
+
+def prepare_col_a_filter(df):
+    if df is None or df.empty:
+        return df, None
+
+    df = df.copy()
+    col_a = df.columns[0]
+
+    parsed_dates = pd.to_datetime(df[col_a], errors="coerce", dayfirst=True)
+
+    if parsed_dates.notna().sum() > 0:
+        df["_col_a_filter_"] = parsed_dates.dt.date
+    else:
+        df["_col_a_filter_"] = df[col_a].astype(str).str.strip()
+
+    return df, col_a
+
+
+def collect_col_a_values(*dfs):
+    values = []
+    for df in dfs:
+        if isinstance(df, pd.DataFrame) and not df.empty and "_col_a_filter_" in df.columns:
+            values.extend(df["_col_a_filter_"].dropna().tolist())
+
+    unique_values = []
+    for v in values:
+        if v not in unique_values:
+            unique_values.append(v)
+
+    return unique_values
+
+
+def filter_by_col_a_value(df, selected_value):
+    if df is None or df.empty:
+        return df
+    if "_col_a_filter_" not in df.columns:
+        return df
+    if selected_value in [None, ""]:
+        return df
+    return df[df["_col_a_filter_"] == selected_value]
 
 
 # =========================================================
@@ -1073,12 +1143,31 @@ if page == "📝 INSTANCES":
     st.subheader("Données source Excel et dispatch par agent")
 
     etat_df = safe_load_excel(ETAT_FILE, ETAT_SHEET, "ETAT FTTH RTC RTCL.xlsx")
+    motif_total_df = safe_load_excel(MOTIF_FILE, MOTIF_SHEET, "MOTIF TOTAL (1).xlsx")
 
     if not etat_df.empty:
+        etat_df, etat_col_a = prepare_col_a_filter(etat_df)
+        motif_total_df, motif_col_a = prepare_col_a_filter(motif_total_df)
+
+        col_a_values = collect_col_a_values(etat_df, motif_total_df)
+
+        if col_a_values:
+            selected_col_a = st.selectbox(
+                "Filtre journalier colonne A",
+                col_a_values,
+                key="source_col_a_filter"
+            )
+
+            etat_df = filter_by_col_a_value(etat_df, selected_col_a)
+            motif_total_df = filter_by_col_a_value(motif_total_df, selected_col_a)
+
+            st.caption("Filtre appliqué sur ETAT FTTH RTC et MOTIF TOTAL via la colonne A.")
+
         search_excel = st.text_input(
             "Recherche dans le fichier source",
             placeholder="demande, secteur, état..."
         )
+
         filtered_etat = global_search(etat_df, search_excel).copy()
 
         etat_col = find_column(filtered_etat, ["etat", "état", "state"])
@@ -1202,12 +1291,27 @@ if page == "📝 INSTANCES":
                             height=220,
                             key=f"excel_msg_{idx}"
                         )
-                        st.dataframe(pd.DataFrame([row]), use_container_width=True)
+                        st.dataframe(
+                            pd.DataFrame([row]).drop(columns=["_col_a_filter_"], errors="ignore"),
+                            use_container_width=True
+                        )
 
                     st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown("### Tableau source complet")
-        st.dataframe(filtered_etat, use_container_width=True, height=420)
+        st.markdown("### Tableau ETAT FTTH RTC filtré")
+        st.dataframe(
+            filtered_etat.drop(columns=["_col_a_filter_"], errors="ignore"),
+            use_container_width=True,
+            height=400
+        )
+
+        if not motif_total_df.empty:
+            st.markdown("### Tableau MOTIF TOTAL filtré")
+            st.dataframe(
+                motif_total_df.drop(columns=["_col_a_filter_"], errors="ignore"),
+                use_container_width=True,
+                height=300
+            )
 
     else:
         st.info("Le fichier source ETAT FTTH RTC RTCL.xlsx n'a pas été chargé.")
@@ -1223,6 +1327,26 @@ elif page == "📊 RAPPORTS":
     email_history_df = load_email_history()
     etat_df = safe_load_excel(ETAT_FILE, ETAT_SHEET, "ETAT FTTH RTC RTCL.xlsx")
     motif_df = safe_load_excel(MOTIF_FILE, MOTIF_SHEET, "MOTIF TOTAL (1).xlsx")
+
+    etat_df, etat_col_a = prepare_col_a_filter(etat_df)
+    motif_df, motif_col_a = prepare_col_a_filter(motif_df)
+
+    col_a_values = collect_col_a_values(etat_df, motif_df)
+
+    if col_a_values:
+        selected_col_a = st.selectbox(
+            "Filtre journalier (colonne A) - ETAT FTTH RTC + MOTIF TOTAL",
+            col_a_values,
+            key="rapport_col_a_filter"
+        )
+
+        etat_df = filter_by_col_a_value(etat_df, selected_col_a)
+        motif_df = filter_by_col_a_value(motif_df, selected_col_a)
+
+        st.caption("Le filtre colonne A est appliqué simultanément sur ETAT FTTH RTC et MOTIF TOTAL.")
+
+    etat_df = etat_df.drop(columns=["_col_a_filter_"], errors="ignore")
+    motif_df = motif_df.drop(columns=["_col_a_filter_"], errors="ignore")
 
     tabs = st.tabs(["📈 Opérationnel", "📧 Historique e-mails", "📄 Source Excel"])
 
@@ -1334,6 +1458,9 @@ elif page == "📊 RAPPORTS":
                     fig5 = px.bar(secteur_source, x="Secteur", y="Nombre", color="Nombre", title="Commandes source par secteur")
                     st.plotly_chart(fig5, use_container_width=True)
 
+                st.markdown("#### Tableau ETAT FTTH RTC filtré")
+                st.dataframe(etat_df, use_container_width=True, height=280)
+
             if not motif_df.empty:
                 st.markdown("### Analyse source motifs")
                 motif_col = find_column(motif_df, ["motif", "detail", "pc mauvais"])
@@ -1343,6 +1470,9 @@ elif page == "📊 RAPPORTS":
                     fig6 = px.bar(motif_source, x="Motif", y="Nombre", color="Nombre", title="Top 15 motifs source")
                     fig6.update_layout(xaxis_tickangle=-45)
                     st.plotly_chart(fig6, use_container_width=True)
+
+                st.markdown("#### Tableau MOTIF TOTAL filtré")
+                st.dataframe(motif_df, use_container_width=True, height=280)
 
 
 # =========================================================
@@ -1358,7 +1488,3 @@ elif page == "🔧 FIABILISATION":
 
 elif page == "⚖️ LITIGES":
     st.subheader("Litiges")
-    st.info("Page prête pour évolution future.")
-
-
-st.caption("InstalPro - Pilotage opérationnel des interventions Fibre & RTC")

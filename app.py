@@ -1,6 +1,8 @@
 import json
 import hashlib
+import smtplib
 import unicodedata
+from email.message import EmailMessage
 from io import BytesIO
 from pathlib import Path
 from datetime import datetime
@@ -18,12 +20,14 @@ APP_NAME = "InstalPro"
 st.set_page_config(page_title=APP_NAME, layout="wide")
 
 BASE_DIR = Path(__file__).parent
-ETAT_FILE = BASE_DIR / "ETAT FTTH RTC RTCL.xlsx"
-MOTIF_FILE = BASE_DIR / "MOTIF TOTAL (1).xlsx"
+LOCAL_ETAT_FILE = BASE_DIR / "ETAT FTTH RTC RTCL.xlsx"
+LOCAL_MOTIF_FILE = BASE_DIR / "MOTIF TOTAL (1).xlsx"
 
-SAISIES_FILE = BASE_DIR / "saisies_instances.csv"
 SETTINGS_FILE = BASE_DIR / "parametres_app.json"
 LOGO_FILE = BASE_DIR / "logo_maroc_telecom.png"
+ASSIGNMENTS_FILE = BASE_DIR / "affectations_agents.csv"
+FEEDBACK_FILE = BASE_DIR / "retours_intervention.csv"
+SMTP_CONFIG_FILE = BASE_DIR / "smtp_config.json"
 
 ETAT_SHEET = "SITUATION14.15"
 MOTIF_SHEET = "MOTIF"
@@ -78,6 +82,12 @@ st.markdown(
         border-radius: 10px !important;
     }
 
+    [data-testid="stSidebar"] input::placeholder,
+    [data-testid="stSidebar"] textarea::placeholder {
+        color: #64748b !important;
+        -webkit-text-fill-color: #64748b !important;
+    }
+
     .block-container {
         padding-top: 1.2rem;
         padding-bottom: 2rem;
@@ -116,6 +126,19 @@ st.markdown(
         box-shadow: 0 8px 20px rgba(37, 211, 102, 0.28);
     }
 
+    .assign-button {
+        display: inline-block;
+        width: 100%;
+        text-align: center;
+        padding: 11px 14px;
+        background: linear-gradient(135deg, #2563eb, #1d4ed8);
+        color: white !important;
+        text-decoration: none !important;
+        border-radius: 12px;
+        font-weight: 700;
+        box-shadow: 0 8px 20px rgba(37, 99, 235, 0.28);
+    }
+
     .info-chip {
         display: inline-block;
         padding: 6px 10px;
@@ -126,6 +149,13 @@ st.markdown(
         color: #0f172a;
         font-size: 12px;
         font-weight: 600;
+    }
+
+    .section-title {
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: #0f172a;
+        margin-bottom: 0.5rem;
     }
     </style>
     """,
@@ -149,10 +179,6 @@ def hash_password(password: str) -> str:
 
 def now_str():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def generate_instance_id():
-    return datetime.now().strftime("%Y%m%d%H%M%S%f")
 
 
 def normalize_text(value):
@@ -189,21 +215,6 @@ def safe_mean_numeric(series):
     return None
 
 
-@st.cache_data(show_spinner=False)
-def load_excel(path_str, sheet_name):
-    return pd.read_excel(path_str, sheet_name=sheet_name)
-
-
-def safe_load_excel(path, sheet_name, label):
-    if not path.exists():
-        return pd.DataFrame()
-    try:
-        return load_excel(str(path), sheet_name)
-    except Exception as e:
-        st.warning(f"Erreur chargement {label} : {e}")
-        return pd.DataFrame()
-
-
 def find_column(df, keywords):
     if df is None or df.empty:
         return None
@@ -214,14 +225,6 @@ def find_column(df, keywords):
         col_name = normalize_text(col)
         if any(k in col_name for k in normalized_keywords):
             return col
-
-    for col in df.columns:
-        try:
-            non_empty = df[col].astype(str).str.strip().replace("nan", "").ne("").sum()
-            if non_empty > 10:
-                return col
-        except Exception:
-            pass
 
     return None
 
@@ -248,7 +251,7 @@ def normalize_product(value):
         "ftth": "FTTH",
         "ftthdfo": "FTTHDFO",
         "rtc": "RTC",
-        "rtcdtl": "RTCDTL"
+        "rtcdtl": "RTCDTL",
     }
     return mapping.get(txt, str(value).strip().upper())
 
@@ -293,19 +296,32 @@ def filter_by_col_a_value(df, selected_value):
     return df[df["_col_a_filter_"] == selected_value]
 
 
-def build_full_row_message(row, title="Détail intervention"):
-    lines = [f"{title}", ""]
-    for col, val in row.items():
-        if str(col).startswith("_"):
+def sanitize_row_dict(row_dict):
+    clean = {}
+    for k, v in row_dict.items():
+        if str(k).startswith("_"):
             continue
-        if pd.isna(val):
+        if pd.isna(v):
+            clean[str(k)] = ""
+        else:
+            clean[str(k)] = str(v)
+    return clean
+
+
+def make_row_id(row_dict):
+    payload = json.dumps(sanitize_row_dict(row_dict), ensure_ascii=False, sort_keys=True)
+    return hashlib.md5(payload.encode("utf-8")).hexdigest()
+
+
+def build_full_row_message(row_dict, title="Intervention terrain"):
+    row_dict = sanitize_row_dict(row_dict)
+    lines = [title, ""]
+    for col, val in row_dict.items():
+        if val == "":
             continue
-        val_str = str(val).strip()
-        if val_str == "":
-            continue
-        lines.append(f"{col} : {val_str}")
+        lines.append(f"{col} : {val}")
     lines.append("")
-    lines.append("Cordialement,")
+    lines.append("Merci d'intervenir et de faire le retour.")
     lines.append("InstalPro")
     return "\n".join(lines)
 
@@ -315,6 +331,96 @@ def build_whatsapp_url(phone, message):
     if not phone:
         return ""
     return f"https://wa.me/{phone}?text={quote(message)}"
+
+
+def default_feedback_record():
+    return {
+        "sr": "",
+        "tt": "",
+        "pc": "",
+        "port": "",
+        "rosasse": "",
+        "msan_port": "",
+        "cable": "",
+        "numero_validation": "",
+        "msan_slot_port_sn": "",
+        "metre_ftth": "",
+        "autre_consomable": "",
+        "commentaire": "",
+        "email_status": "",
+        "email_date": "",
+    }
+
+
+# =========================================================
+# FILE LOADERS
+# =========================================================
+def load_excel_from_upload_or_local(uploaded_file, local_path, sheet_name, label):
+    if uploaded_file is not None:
+        try:
+            uploaded_bytes = BytesIO(uploaded_file.getvalue())
+            return pd.read_excel(uploaded_bytes, sheet_name=sheet_name)
+        except Exception as e:
+            st.warning(f"Erreur lecture fichier importé {label} : {e}")
+            return pd.DataFrame()
+
+    if local_path.exists():
+        try:
+            return pd.read_excel(local_path, sheet_name=sheet_name)
+        except Exception as e:
+            st.warning(f"Erreur lecture fichier local {label} : {e}")
+            return pd.DataFrame()
+
+    return pd.DataFrame()
+
+
+# =========================================================
+# JSON / CSV STORAGE
+# =========================================================
+def load_json(path, default_data):
+    if not path.exists():
+        save_json(path, default_data)
+        return default_data
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        save_json(path, default_data)
+        return default_data
+
+
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def load_csv(path):
+    if path.exists():
+        try:
+            return pd.read_csv(path)
+        except Exception:
+            return pd.DataFrame()
+    return pd.DataFrame()
+
+
+def upsert_csv_record(path, key_col, record):
+    df = load_csv(path)
+    record_df = pd.DataFrame([record])
+
+    if df.empty or key_col not in df.columns:
+        record_df.to_csv(path, index=False)
+        return
+
+    mask = df[key_col].astype(str) == str(record[key_col])
+    if mask.any():
+        for col, val in record.items():
+            if col not in df.columns:
+                df[col] = ""
+            df.loc[mask, col] = val
+    else:
+        df = pd.concat([df, record_df], ignore_index=True)
+
+    df.to_csv(path, index=False)
 
 
 # =========================================================
@@ -334,11 +440,6 @@ def default_settings():
     }
 
 
-def save_settings(data):
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-
 def sync_agent_contacts(settings):
     if "agent_contacts" not in settings or not isinstance(settings["agent_contacts"], dict):
         settings["agent_contacts"] = {}
@@ -355,25 +456,14 @@ def sync_agent_contacts(settings):
 
 
 def load_settings():
-    defaults = default_settings()
+    settings = load_json(SETTINGS_FILE, default_settings())
+    settings = sync_agent_contacts(settings)
+    save_json(SETTINGS_FILE, settings)
+    return settings
 
-    if not SETTINGS_FILE.exists():
-        save_settings(defaults)
-        return defaults
 
-    try:
-        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        data = defaults
-
-    for key, value in defaults.items():
-        if key not in data:
-            data[key] = value
-
-    data = sync_agent_contacts(data)
-    save_settings(data)
-    return data
+def save_settings(settings):
+    save_json(SETTINGS_FILE, settings)
 
 
 def add_item_to_settings(settings, key, value):
@@ -401,7 +491,6 @@ def update_item_in_settings(settings, key, old_value, new_value):
 
     if not old_value or not new_value:
         return False, "Valeur invalide."
-
     if old_value not in settings.get(key, []):
         return False, "Élément introuvable."
 
@@ -409,8 +498,8 @@ def update_item_in_settings(settings, key, old_value, new_value):
     if new_value.lower() in existing_lower:
         return False, f"{new_value} existe déjà."
 
-    index = settings[key].index(old_value)
-    settings[key][index] = new_value
+    idx = settings[key].index(old_value)
+    settings[key][idx] = new_value
     settings[key] = sorted(settings[key], key=lambda x: x.lower())
 
     if key == "agents":
@@ -427,7 +516,6 @@ def delete_item_in_settings(settings, key, value):
 
     if value not in settings.get(key, []):
         return False, "Élément introuvable."
-
     if len(settings[key]) <= 1:
         return False, "Impossible de supprimer le dernier élément."
 
@@ -441,21 +529,76 @@ def delete_item_in_settings(settings, key, value):
 
 
 def get_agent_contact(settings, agent_name):
-    contacts = settings.get("agent_contacts", {})
-    return contacts.get(agent_name, {"whatsapp": ""})
+    return settings.get("agent_contacts", {}).get(agent_name, {"whatsapp": ""})
 
 
 def update_agent_contact(settings, agent_name, whatsapp):
     settings = sync_agent_contacts(settings)
-    settings["agent_contacts"][agent_name] = {
-        "whatsapp": str(whatsapp).strip()
-    }
+    settings["agent_contacts"][agent_name] = {"whatsapp": str(whatsapp).strip()}
     save_settings(settings)
-    return True
 
 
 # =========================================================
-# AUTH ADMIN
+# SMTP CONFIG
+# =========================================================
+def default_smtp_config():
+    return {
+        "smtp_server": "smtp.office365.com",
+        "smtp_port": 587,
+        "sender_email": "",
+        "sender_password": "",
+        "recipient_email": ""
+    }
+
+
+def load_smtp_config():
+    return load_json(SMTP_CONFIG_FILE, default_smtp_config())
+
+
+def save_smtp_config(config):
+    save_json(SMTP_CONFIG_FILE, config)
+
+
+def send_email_smtp(config, subject, body):
+    sender = config.get("sender_email", "").strip()
+    password = config.get("sender_password", "").strip()
+    recipient = config.get("recipient_email", "").strip()
+    smtp_server = config.get("smtp_server", "").strip()
+    smtp_port = int(config.get("smtp_port", 587))
+
+    if not sender or not password or not recipient or not smtp_server:
+        raise ValueError("Configuration SMTP incomplète.")
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = sender
+    msg["To"] = recipient
+    msg.set_content(body)
+
+    with smtplib.SMTP(smtp_server, smtp_port) as server:
+        server.starttls()
+        server.login(sender, password)
+        server.send_message(msg)
+
+
+def build_feedback_email_subject(feedback_record):
+    return f"Retour intervention - {feedback_record.get('commande', '')} - {feedback_record.get('agent_name', '')}"
+
+
+def build_feedback_email_body(feedback_record):
+    lines = [
+        "Retour intervention terrain",
+        "",
+    ]
+    for k, v in feedback_record.items():
+        if v is None or str(v).strip() == "":
+            continue
+        lines.append(f"{k} : {v}")
+    return "\n".join(lines)
+
+
+# =========================================================
+# AUTH
 # =========================================================
 def init_auth_state():
     if "is_admin" not in st.session_state:
@@ -480,49 +623,7 @@ def admin_logout():
 
 
 # =========================================================
-# DATA
-# =========================================================
-def load_saved_instances():
-    if SAISIES_FILE.exists():
-        try:
-            return pd.read_csv(SAISIES_FILE)
-        except Exception:
-            return pd.DataFrame()
-    return pd.DataFrame()
-
-
-def save_instance(record):
-    new_df = pd.DataFrame([record])
-
-    if SAISIES_FILE.exists():
-        old_df = pd.read_csv(SAISIES_FILE)
-        final_df = pd.concat([old_df, new_df], ignore_index=True)
-    else:
-        final_df = new_df
-
-    final_df.to_csv(SAISIES_FILE, index=False)
-
-
-def update_instance(instance_id, updates):
-    df = load_saved_instances()
-    if df.empty or "instance_id" not in df.columns:
-        return False
-
-    mask = df["instance_id"].astype(str) == str(instance_id)
-    if not mask.any():
-        return False
-
-    for key, value in updates.items():
-        if key not in df.columns:
-            df[key] = ""
-        df.loc[mask, key] = value
-
-    df.to_csv(SAISIES_FILE, index=False)
-    return True
-
-
-# =========================================================
-# HEADER
+# ADMIN UI HELPERS
 # =========================================================
 def render_header():
     if LOGO_FILE.exists():
@@ -549,22 +650,19 @@ def render_header():
         )
 
 
-# =========================================================
-# ADMIN RENDER
-# =========================================================
 def render_manager_tab(settings, key, label):
     current_items = settings.get(key, [])
 
     st.markdown(f"### Gestion des {label.lower()}s")
     st.write(current_items)
 
-    a1, a2, a3 = st.columns(3)
+    c1, c2, c3 = st.columns(3)
 
-    with a1:
+    with c1:
         with st.form(f"add_{key}_form"):
             new_value = st.text_input(f"Nouveau {label.lower()}", key=f"new_{key}")
-            submit = st.form_submit_button("➕ Ajouter")
-            if submit:
+            submitted = st.form_submit_button("➕ Ajouter")
+            if submitted:
                 ok, msg = add_item_to_settings(settings, key, new_value)
                 if ok:
                     st.success(msg)
@@ -572,12 +670,12 @@ def render_manager_tab(settings, key, label):
                 else:
                     st.error(msg)
 
-    with a2:
+    with c2:
         with st.form(f"edit_{key}_form"):
             old_value = st.selectbox(f"{label} à modifier", current_items, key=f"old_{key}")
             new_value = st.text_input("Nouveau nom", key=f"edit_{key}")
-            submit = st.form_submit_button("✏️ Modifier")
-            if submit:
+            submitted = st.form_submit_button("✏️ Modifier")
+            if submitted:
                 ok, msg = update_item_in_settings(settings, key, old_value, new_value)
                 if ok:
                     st.success(msg)
@@ -585,11 +683,11 @@ def render_manager_tab(settings, key, label):
                 else:
                     st.error(msg)
 
-    with a3:
+    with c3:
         with st.form(f"delete_{key}_form"):
             selected = st.selectbox(f"{label} à supprimer", current_items, key=f"del_{key}")
-            submit = st.form_submit_button("🗑️ Supprimer")
-            if submit:
+            submitted = st.form_submit_button("🗑️ Supprimer")
+            if submitted:
                 ok, msg = delete_item_in_settings(settings, key, selected)
                 if ok:
                     st.success(msg)
@@ -609,8 +707,8 @@ def render_agent_contacts_admin(settings):
 
     with st.form("agent_contact_form"):
         whatsapp_value = st.text_input("Numéro WhatsApp de l'agent", value=current.get("whatsapp", ""))
-        submit = st.form_submit_button("💾 Enregistrer contact agent")
-        if submit:
+        submitted = st.form_submit_button("💾 Enregistrer contact agent")
+        if submitted:
             update_agent_contact(settings, selected_agent, whatsapp_value)
             st.success(f"WhatsApp de l'agent {selected_agent} mis à jour.")
             rerun_app()
@@ -626,11 +724,12 @@ def render_agent_contacts_admin(settings):
 # =========================================================
 init_auth_state()
 settings = load_settings()
+smtp_config = load_smtp_config()
 render_header()
 
 
 # =========================================================
-# SIDEBAR ADMIN
+# SIDEBAR
 # =========================================================
 with st.sidebar:
     st.header("Administration")
@@ -655,11 +754,32 @@ with st.sidebar:
             rerun_app()
 
         st.markdown("---")
+        st.subheader("Email Outlook pour retour terrain")
+        with st.form("smtp_form"):
+            smtp_server = st.text_input("Serveur SMTP", value=smtp_config.get("smtp_server", "smtp.office365.com"))
+            smtp_port = st.number_input("Port SMTP", min_value=1, max_value=9999, value=int(smtp_config.get("smtp_port", 587)))
+            sender_email = st.text_input("Email expéditeur", value=smtp_config.get("sender_email", ""))
+            sender_password = st.text_input("Mot de passe SMTP", type="password", value=smtp_config.get("sender_password", ""))
+            recipient_email = st.text_input("Email destinataire retour", value=smtp_config.get("recipient_email", ""))
+
+            smtp_btn = st.form_submit_button("💾 Enregistrer email Outlook")
+            if smtp_btn:
+                smtp_config = {
+                    "smtp_server": smtp_server,
+                    "smtp_port": int(smtp_port),
+                    "sender_email": sender_email,
+                    "sender_password": sender_password,
+                    "recipient_email": recipient_email,
+                }
+                save_smtp_config(smtp_config)
+                st.success("Configuration email enregistrée.")
+
+        st.markdown("---")
         st.subheader("Logo")
         uploaded_logo = st.file_uploader("Uploader le logo Maroc Telecom", type=["png", "jpg", "jpeg"])
-        lc1, lc2 = st.columns(2)
+        c1, c2 = st.columns(2)
 
-        with lc1:
+        with c1:
             if st.button("💾 Sauvegarder logo"):
                 if uploaded_logo is not None:
                     with open(LOGO_FILE, "wb") as f:
@@ -669,7 +789,7 @@ with st.sidebar:
                 else:
                     st.warning("Choisis un logo d'abord.")
 
-        with lc2:
+        with c2:
             if st.button("🗑️ Supprimer logo"):
                 if LOGO_FILE.exists():
                     LOGO_FILE.unlink()
@@ -680,7 +800,7 @@ with st.sidebar:
 
         st.markdown("---")
         st.subheader("Sécurité admin")
-        with st.form("change_admin_credentials"):
+        with st.form("admin_security_form"):
             new_admin_user = st.text_input("Nouveau nom admin", value=settings.get("admin_username", "admin"))
             new_admin_password = st.text_input("Nouveau mot de passe admin", type="password")
             save_admin_btn = st.form_submit_button("🔑 Mettre à jour")
@@ -708,10 +828,17 @@ page = st.radio(
 
 
 # =========================================================
+# DATA FOR PAGES
+# =========================================================
+assignments_df = load_csv(ASSIGNMENTS_FILE)
+feedback_df = load_csv(FEEDBACK_FILE)
+
+
+# =========================================================
 # PAGE INSTANCES
 # =========================================================
 if page == "🗂️ INSTANCES":
-    st.subheader("Étape 1 - Saisie et enregistrement")
+    st.subheader("Import et dispatch des instances")
 
     if st.session_state["is_admin"]:
         with st.expander("⚙️ Administration complète", expanded=False):
@@ -725,226 +852,64 @@ if page == "🗂️ INSTANCES":
             with tabs[3]:
                 render_agent_contacts_admin(settings)
 
-    with st.form("instance_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
+    st.markdown("### Import des fichiers")
+    up1, up2 = st.columns(2)
+    with up1:
+        uploaded_etat = st.file_uploader("Importer ETAT FTTH RTC", type=["xlsx"], key="upload_etat")
+    with up2:
+        uploaded_motif = st.file_uploader("Importer MOTIF TOTAL", type=["xlsx"], key="upload_motif")
 
-        with col1:
-            utilisateur = st.selectbox("Utilisateur", settings["utilisateurs"])
-            demande = st.text_input("Demande *", placeholder="000D740B")
-            nom = st.text_input("Nom")
-            contact = st.text_input("Contact")
-            adresse = st.text_area("Adresse", height=90)
+    etat_df = load_excel_from_upload_or_local(uploaded_etat, LOCAL_ETAT_FILE, ETAT_SHEET, "ETAT")
+    motif_df = load_excel_from_upload_or_local(uploaded_motif, LOCAL_MOTIF_FILE, MOTIF_SHEET, "MOTIF")
 
-        with col2:
-            telecopie = st.text_input("N° de télécopie *", placeholder="525311326")
-            date_reception = st.date_input("Date de réception", datetime.now().date())
-            secteur = st.selectbox("Secteur", settings["secteurs"])
-            agent_assigne = st.selectbox("Agent à envoyer", settings["agents"])
-
-        motif_options = [
-            "Adresse erronée",
-            "Client refuse installation",
-            "Transport saturé",
-            "PC saturé",
-            "INJOINABLE",
-            "Local fermé + injoignable",
-            "Création PC",
-            "ETUDE CREATION PC",
-            "MSAN saturé",
-            "Autre"
-        ]
-        motif = st.selectbox("Motif", motif_options)
-        if motif == "Autre":
-            motif = st.text_input("Précisez le motif")
-
-        submit_instance = st.form_submit_button("✅ Enregistrer l'instance")
-
-        if submit_instance:
-            if demande and telecopie and motif:
-                agent_contact = get_agent_contact(settings, agent_assigne)
-
-                record = {
-                    "instance_id": generate_instance_id(),
-                    "date_saisie": now_str(),
-                    "utilisateur": utilisateur,
-                    "demande": demande,
-                    "nom": nom,
-                    "contact": contact,
-                    "adresse": adresse,
-                    "telecopie": telecopie,
-                    "date_reception": str(date_reception),
-                    "secteur": secteur,
-                    "agent_assigne": agent_assigne,
-                    "agent_whatsapp": agent_contact.get("whatsapp", ""),
-                    "motif": motif,
-                    "statut_etape": "Étape 1 - enregistrée",
-                    "statut_whatsapp": "Non envoyé",
-                    "date_whatsapp": ""
-                }
-                save_instance(record)
-                st.success("Instance enregistrée avec succès. Passe à l'étape 2 pour l'envoi.")
-            else:
-                st.error("Les champs Demande, Télécopie et Motif sont obligatoires.")
-
-    st.markdown("---")
-    st.subheader("Étape 2 - Envoi des instances")
-
-    saved_df = load_saved_instances()
-
-    if saved_df.empty:
-        st.info("Aucune instance enregistrée.")
+    if etat_df.empty:
+        st.warning("Importe le fichier ETAT FTTH RTC pour commencer.")
     else:
-        if "agent_assigne" not in saved_df.columns:
-            saved_df["agent_assigne"] = ""
-        if "agent_whatsapp" not in saved_df.columns:
-            saved_df["agent_whatsapp"] = ""
-
-        f1, f2, f3 = st.columns(3)
-        with f1:
-            search_saved = st.text_input("Recherche", placeholder="commande, agent, motif...")
-        with f2:
-            sector_choices = ["Tous"]
-            if "secteur" in saved_df.columns:
-                sector_choices += sorted(saved_df["secteur"].dropna().astype(str).unique().tolist())
-            selected_sector = st.selectbox("Filtre secteur", sector_choices)
-        with f3:
-            selected_agent = st.selectbox("Filtre agent", ["Tous"] + settings["agents"])
-
-        filtered_saved = global_search(saved_df, search_saved).copy()
-
-        if selected_sector != "Tous" and "secteur" in filtered_saved.columns:
-            filtered_saved = filtered_saved[filtered_saved["secteur"].astype(str) == selected_sector]
-
-        if selected_agent != "Tous" and "agent_assigne" in filtered_saved.columns:
-            filtered_saved = filtered_saved[filtered_saved["agent_assigne"].astype(str) == selected_agent]
-
-        try:
-            filtered_saved = filtered_saved.sort_values(by="date_saisie", ascending=False)
-        except Exception:
-            pass
-
-        for _, row in filtered_saved.iterrows():
-            instance_id = str(row.get("instance_id", ""))
-            agent_name = str(row.get("agent_assigne", ""))
-            agent_contact = get_agent_contact(settings, agent_name)
-            agent_whatsapp = agent_contact.get("whatsapp", "") or row.get("agent_whatsapp", "")
-            message = build_full_row_message(row.to_dict(), title="Nouvelle intervention terrain")
-            wa_url = build_whatsapp_url(agent_whatsapp, message)
-
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-
-            c1, c2, c3 = st.columns([5.2, 1.8, 1.3])
-
-            with c1:
-                st.markdown(
-                    f"""
-**Commande :** {row.get('demande', '')}  
-**Agent :** {agent_name}  
-**Secteur :** {row.get('secteur', '')}  
-**Adresse :** {row.get('adresse', '')}  
-**Motif :** {row.get('motif', '')}  
-**Statut global :** {row.get('statut_etape', '')}
-"""
-                )
-                st.markdown(
-                    f"""
-<span class="info-chip">WhatsApp agent : {agent_whatsapp or 'Non configuré'}</span>
-                    """,
-                    unsafe_allow_html=True
-                )
-
-            with c2:
-                if wa_url:
-                    st.markdown(render_whatsapp_button(wa_url), unsafe_allow_html=True)
-                else:
-                    st.caption("WhatsApp non configuré")
-
-            with c3:
-                if st.session_state["is_admin"]:
-                    if st.button("✅ Marquer envoyé", key=f"wa_mark_{instance_id}"):
-                        update_instance(
-                            instance_id,
-                            {
-                                "statut_whatsapp": "Envoyé",
-                                "date_whatsapp": now_str(),
-                                "statut_etape": "Étape 2 - WhatsApp envoyé"
-                            }
-                        )
-                        st.success("WhatsApp marqué comme envoyé.")
-                        rerun_app()
-                else:
-                    st.caption("Admin requis")
-
-            with st.expander(f"Voir détail - {row.get('demande', '')}"):
-                st.text_area(
-                    "Message complet envoyé à l'agent",
-                    value=message,
-                    height=260,
-                    key=f"msg_{instance_id}"
-                )
-
-            st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown("---")
-    st.subheader("Données source Excel et envoi à un agent")
-
-    etat_df = safe_load_excel(ETAT_FILE, ETAT_SHEET, "ETAT FTTH RTC RTCL.xlsx")
-    motif_total_df = safe_load_excel(MOTIF_FILE, MOTIF_SHEET, "MOTIF TOTAL (1).xlsx")
-
-    if not etat_df.empty:
         etat_df, _ = prepare_col_a_filter(etat_df)
-        motif_total_df, _ = prepare_col_a_filter(motif_total_df)
+        motif_df, _ = prepare_col_a_filter(motif_df)
 
-        col_a_values = collect_col_a_values(etat_df, motif_total_df)
-
-        if col_a_values:
-            selected_col_a = st.selectbox(
-                "Filtre journalier colonne A",
-                col_a_values,
-                key="source_col_a_filter"
-            )
-
-            etat_df = filter_by_col_a_value(etat_df, selected_col_a)
-            motif_total_df = filter_by_col_a_value(motif_total_df, selected_col_a)
-
-            st.caption("Filtre appliqué sur ETAT FTTH RTC et MOTIF TOTAL via la colonne A.")
-
+        col_a_values = collect_col_a_values(etat_df, motif_df)
         produit_col = find_column(etat_df, ["s.produit", "produit", "s produit"])
-        motif_produit_col = find_column(motif_total_df, ["s.produit", "produit", "s produit"])
-        produit_options = ["Tous", "FTTH", "FTTHDFO", "RTC", "RTCDTL"]
+        motif_produit_col = find_column(motif_df, ["s.produit", "produit", "s produit"])
 
-        cprod1, cprod2 = st.columns([2, 3])
+        f1, f2, f3 = st.columns([2, 2, 3])
 
-        with cprod1:
-            selected_produit = st.selectbox(
+        with f1:
+            selected_day = st.selectbox(
+                "Filtre journalier colonne A",
+                col_a_values if col_a_values else [""],
+                key="day_filter_instances"
+            ) if col_a_values else ""
+
+        with f2:
+            selected_product = st.selectbox(
                 "Filtre s.produit",
-                produit_options,
-                key="source_produit_filter"
+                ["Tous", "FTTH", "FTTHDFO", "RTC", "RTCDTL"],
+                key="product_filter_instances"
             )
 
-        with cprod2:
-            search_excel = st.text_input(
-                "Recherche dans le fichier source",
-                placeholder="commande, adresse, secteur, état..."
+        with f3:
+            search_query = st.text_input(
+                "Recherche globale",
+                placeholder="commande, adresse, contact, secteur..."
             )
 
-        filtered_etat = etat_df.copy()
+        if selected_day:
+            etat_df = filter_by_col_a_value(etat_df, selected_day)
+            motif_df = filter_by_col_a_value(motif_df, selected_day)
 
-        if produit_col and selected_produit != "Tous":
-            filtered_etat = filtered_etat[
-                filtered_etat[produit_col].astype(str).apply(normalize_product) == selected_produit
-            ]
+        if produit_col and selected_product != "Tous":
+            etat_df = etat_df[etat_df[produit_col].astype(str).apply(normalize_product) == selected_product]
 
-        if motif_produit_col and selected_produit != "Tous":
-            motif_total_df = motif_total_df[
-                motif_total_df[motif_produit_col].astype(str).apply(normalize_product) == selected_produit
-            ]
+        if motif_produit_col and selected_product != "Tous":
+            motif_df = motif_df[motif_df[motif_produit_col].astype(str).apply(normalize_product) == selected_product]
 
-        filtered_etat = global_search(filtered_etat, search_excel).copy()
+        filtered_etat = global_search(etat_df, search_query).copy()
 
         etat_col = find_column(filtered_etat, ["etat", "état", "state"])
         secteur_col = find_column(filtered_etat, ["secteur", "sector"])
         demande_col = find_column(filtered_etat, ["demande", "commande", "reference", "référence"])
+        produit_col_filtered = find_column(filtered_etat, ["s.produit", "produit", "s produit"])
 
         if etat_col:
             filtered_etat["CODE_INTERVENTION"] = filtered_etat[etat_col].apply(normalize_intervention_code)
@@ -952,11 +917,11 @@ if page == "🗂️ INSTANCES":
                 filtered_etat["CODE_INTERVENTION"].isin(["NA", "RM", "TR", "TL"])
             ].copy()
 
-            st.markdown("### Lignes dispatchables selon la colonne État")
-            st.caption("NA / RM / TR / TL = code intervention, pas nom agent.")
+            st.markdown("### Lignes dispatchables")
+            st.caption("NA / RM / TR / TL = code d’intervention. Choisis ensuite un vrai agent.")
 
             if actionable_df.empty:
-                st.info("Aucune ligne avec État = NA / RM / TR / TL.")
+                st.info("Aucune ligne dispatchable avec code intervention NA / RM / TR / TL.")
             else:
                 max_rows = st.number_input(
                     "Nombre de lignes à afficher",
@@ -969,65 +934,252 @@ if page == "🗂️ INSTANCES":
                 preview_df = actionable_df.head(max_rows)
 
                 for idx, row in preview_df.iterrows():
+                    row_dict = row.to_dict()
+                    row_id = make_row_id(row_dict)
+
+                    existing_assignment = pd.DataFrame()
+                    if not assignments_df.empty and "row_id" in assignments_df.columns:
+                        existing_assignment = assignments_df[assignments_df["row_id"].astype(str) == row_id]
+
+                    existing_agent = ""
+                    existing_whatsapp = ""
+                    existing_sent_status = "Non envoyé"
+                    if not existing_assignment.empty:
+                        existing_agent = str(existing_assignment.iloc[0].get("agent_name", ""))
+                        existing_whatsapp = str(existing_assignment.iloc[0].get("agent_whatsapp", ""))
+                        existing_sent_status = str(existing_assignment.iloc[0].get("whatsapp_status", "Non envoyé"))
+
                     code_intervention = row.get("CODE_INTERVENTION", "")
                     demande_value = row.get(demande_col, "") if demande_col else ""
                     secteur_value = row.get(secteur_col, "") if secteur_col else ""
-                    etat_value = row.get(etat_col, "")
+                    produit_value = row.get(produit_col_filtered, "") if produit_col_filtered else ""
+                    produit_norm = normalize_product(produit_value)
 
-                    assign_col1, assign_col2 = st.columns([3, 5])
-                    with assign_col1:
-                        selected_real_agent = st.selectbox(
-                            f"Agent pour ligne {idx}",
-                            settings["agents"],
-                            key=f"excel_agent_select_{idx}"
-                        )
-
-                    agent_contact = get_agent_contact(settings, selected_real_agent)
-                    agent_whatsapp = agent_contact.get("whatsapp", "")
-                    full_row_message = build_full_row_message(
-                        row.to_dict(),
-                        title=f"Intervention terrain - Code {code_intervention}"
-                    )
-                    wa_url = build_whatsapp_url(agent_whatsapp, full_row_message)
+                    default_agent_index = 0
+                    if existing_agent and existing_agent in settings["agents"]:
+                        default_agent_index = settings["agents"].index(existing_agent)
 
                     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
 
-                    c1, c2 = st.columns([5.4, 1.8])
+                    top1, top2 = st.columns([4.8, 2.2])
 
-                    with c1:
+                    with top1:
                         st.markdown(
                             f"""
 **Commande :** {demande_value}  
 **Secteur :** {secteur_value}  
-**État source :** {etat_value}  
-**Code intervention :** {code_intervention}  
-**Agent choisi :** {selected_real_agent}
+**Produit :** {produit_norm}  
+**Code intervention :** {code_intervention}
 """
                         )
-                        st.markdown(
-                            f"""
-<span class="info-chip">WhatsApp agent : {agent_whatsapp or 'Non configuré'}</span>
-                            """,
-                            unsafe_allow_html=True
+
+                    with top2:
+                        selected_real_agent = st.selectbox(
+                            f"Choisir l'agent - ligne {idx}",
+                            settings["agents"],
+                            index=default_agent_index,
+                            key=f"agent_pick_{row_id}"
                         )
 
-                    with c2:
+                    current_agent_contact = get_agent_contact(settings, selected_real_agent)
+                    selected_agent_whatsapp = current_agent_contact.get("whatsapp", "")
+                    full_message = build_full_row_message(
+                        row_dict,
+                        title=f"Intervention terrain - {code_intervention}"
+                    )
+                    wa_url = build_whatsapp_url(selected_agent_whatsapp, full_message)
+
+                    st.markdown(
+                        f"""
+<span class="info-chip">Agent choisi : {selected_real_agent}</span>
+<span class="info-chip">WhatsApp : {selected_agent_whatsapp or 'Non configuré'}</span>
+<span class="info-chip">Statut WhatsApp : {existing_sent_status}</span>
+                        """,
+                        unsafe_allow_html=True
+                    )
+
+                    a1, a2, a3 = st.columns([2.1, 1.8, 1.2])
+
+                    with a1:
+                        if st.button("💾 Affecter et enregistrer l’agent choisi", key=f"assign_{row_id}"):
+                            assignment_record = {
+                                "row_id": row_id,
+                                "date_assignment": now_str(),
+                                "agent_name": selected_real_agent,
+                                "agent_whatsapp": selected_agent_whatsapp,
+                                "code_intervention": code_intervention,
+                                "produit": produit_norm,
+                                "commande": demande_value,
+                                "secteur": secteur_value,
+                                "whatsapp_status": existing_sent_status,
+                                "row_payload_json": json.dumps(sanitize_row_dict(row_dict), ensure_ascii=False)
+                            }
+                            upsert_csv_record(ASSIGNMENTS_FILE, "row_id", assignment_record)
+                            st.success(f"Agent {selected_real_agent} affecté.")
+                            rerun_app()
+
+                    with a2:
                         if wa_url:
-                            st.markdown(render_whatsapp_button(wa_url), unsafe_allow_html=True)
+                            st.markdown(
+                                f"""
+<div class="wa-button">
+    <a href="{wa_url}" target="_blank">💬 Envoyer à l’agent</a>
+</div>
+                                """,
+                                unsafe_allow_html=True
+                            )
                         else:
-                            st.caption("WhatsApp non configuré")
+                            st.caption("WhatsApp agent non configuré")
 
-                    with st.expander(f"Détail ligne Excel - {demande_value if demande_value else idx}"):
+                    with a3:
+                        if st.session_state["is_admin"]:
+                            if st.button("✅ Marquer WA", key=f"mark_wa_{row_id}"):
+                                assignment_record = {
+                                    "row_id": row_id,
+                                    "date_assignment": now_str(),
+                                    "agent_name": selected_real_agent,
+                                    "agent_whatsapp": selected_agent_whatsapp,
+                                    "code_intervention": code_intervention,
+                                    "produit": produit_norm,
+                                    "commande": demande_value,
+                                    "secteur": secteur_value,
+                                    "whatsapp_status": "Envoyé",
+                                    "row_payload_json": json.dumps(sanitize_row_dict(row_dict), ensure_ascii=False)
+                                }
+                                upsert_csv_record(ASSIGNMENTS_FILE, "row_id", assignment_record)
+                                st.success("WhatsApp marqué comme envoyé.")
+                                rerun_app()
+
+                    existing_feedback = pd.DataFrame()
+                    if not feedback_df.empty and "row_id" in feedback_df.columns:
+                        existing_feedback = feedback_df[feedback_df["row_id"].astype(str) == row_id]
+
+                    fb = default_feedback_record()
+                    if not existing_feedback.empty:
+                        for k in fb.keys():
+                            fb[k] = str(existing_feedback.iloc[0].get(k, ""))
+
+                    with st.expander("📝 Saisie retour agent + envoi email Outlook"):
                         st.text_area(
-                            "Message complet WhatsApp",
-                            value=full_row_message,
-                            height=260,
-                            key=f"excel_msg_{idx}"
+                            "Message complet envoyé à l’agent",
+                            value=full_message,
+                            height=220,
+                            key=f"msg_full_{row_id}"
                         )
-                        st.dataframe(
-                            pd.DataFrame([row]).drop(columns=["_col_a_filter_"], errors="ignore"),
-                            use_container_width=True
-                        )
+
+                        with st.form(f"feedback_form_{row_id}"):
+                            st.markdown("#### Retour terrain")
+                            cfb1, cfb2 = st.columns(2)
+
+                            with cfb1:
+                                commentaire = st.text_area("Commentaire agent", value=fb["commentaire"], height=80)
+
+                            with cfb2:
+                                st.write(f"Produit détecté : **{produit_norm}**")
+                                st.write(f"Code intervention : **{code_intervention}**")
+                                st.write(f"Agent : **{selected_real_agent}**")
+
+                            rtc_mode = produit_norm in ["RTC", "RTCDTL"]
+                            ftth_mode = produit_norm in ["FTTH", "FTTHDFO"]
+
+                            if rtc_mode:
+                                st.markdown("#### Champs RTC / RTCDTL")
+                                r1, r2, r3 = st.columns(3)
+                                with r1:
+                                    sr = st.text_input("SR", value=fb["sr"])
+                                    tt = st.text_input("TT", value=fb["tt"])
+                                with r2:
+                                    pc = st.text_input("PC", value=fb["pc"])
+                                    port = st.text_input("Port", value=fb["port"])
+                                with r3:
+                                    rosasse = st.text_input("Rosasse", value=fb["rosasse"])
+                                    msan_port = st.text_input("MSAN.port", value=fb["msan_port"])
+
+                                cable = st.selectbox(
+                                    "Câble",
+                                    ["", "1/6", "5/9"],
+                                    index=(["", "1/6", "5/9"].index(fb["cable"]) if fb["cable"] in ["", "1/6", "5/9"] else 0),
+                                    key=f"cable_{row_id}"
+                                )
+
+                                numero_validation = ""
+                                msan_slot_port_sn = ""
+                                metre_ftth = ""
+                                autre_consomable = ""
+
+                            elif ftth_mode:
+                                st.markdown("#### Champs FTTH / FTTHDFO")
+                                r1, r2 = st.columns(2)
+                                with r1:
+                                    numero_validation = st.text_input("Numéro de validation", value=fb["numero_validation"])
+                                    msan_slot_port_sn = st.text_input("MSAN.slot.port.sn", value=fb["msan_slot_port_sn"])
+                                with r2:
+                                    metre_ftth = st.text_input("Combien de mètre FTTH", value=fb["metre_ftth"])
+                                    autre_consomable = st.text_input("Autre consommable", value=fb["autre_consomable"])
+
+                                sr = ""
+                                tt = ""
+                                pc = ""
+                                port = ""
+                                rosasse = ""
+                                msan_port = ""
+                                cable = ""
+
+                            else:
+                                st.markdown("#### Champs libres")
+                                sr = ""
+                                tt = ""
+                                pc = ""
+                                port = ""
+                                rosasse = ""
+                                msan_port = ""
+                                cable = ""
+                                numero_validation = ""
+                                msan_slot_port_sn = ""
+                                metre_ftth = ""
+                                autre_consomable = ""
+
+                            submit_feedback = st.form_submit_button("📤 Enregistrer la saisie et envoyer l’email Outlook")
+
+                            if submit_feedback:
+                                feedback_record = {
+                                    "row_id": row_id,
+                                    "date_feedback": now_str(),
+                                    "commande": demande_value,
+                                    "secteur": secteur_value,
+                                    "produit": produit_norm,
+                                    "code_intervention": code_intervention,
+                                    "agent_name": selected_real_agent,
+                                    "agent_whatsapp": selected_agent_whatsapp,
+                                    "sr": sr,
+                                    "tt": tt,
+                                    "pc": pc,
+                                    "port": port,
+                                    "rosasse": rosasse,
+                                    "msan_port": msan_port,
+                                    "cable": cable,
+                                    "numero_validation": numero_validation,
+                                    "msan_slot_port_sn": msan_slot_port_sn,
+                                    "metre_ftth": metre_ftth,
+                                    "autre_consomable": autre_consomable,
+                                    "commentaire": commentaire,
+                                    "email_status": "Non envoyé",
+                                    "email_date": "",
+                                }
+
+                                try:
+                                    subject = build_feedback_email_subject(feedback_record)
+                                    body = build_feedback_email_body(feedback_record)
+                                    send_email_smtp(load_smtp_config(), subject, body)
+                                    feedback_record["email_status"] = "Envoyé"
+                                    feedback_record["email_date"] = now_str()
+                                except Exception as e:
+                                    feedback_record["email_status"] = f"Erreur: {e}"
+                                    feedback_record["email_date"] = now_str()
+
+                                upsert_csv_record(FEEDBACK_FILE, "row_id", feedback_record)
+                                st.success("Retour enregistré. Vérifie le statut email.")
+                                rerun_app()
 
                     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1035,165 +1187,128 @@ if page == "🗂️ INSTANCES":
         st.dataframe(
             filtered_etat.drop(columns=["_col_a_filter_"], errors="ignore"),
             use_container_width=True,
-            height=400
+            height=380
         )
 
-        if not motif_total_df.empty:
+        if not motif_df.empty:
             st.markdown("### Tableau MOTIF TOTAL filtré")
             st.dataframe(
-                motif_total_df.drop(columns=["_col_a_filter_"], errors="ignore"),
+                motif_df.drop(columns=["_col_a_filter_"], errors="ignore"),
                 use_container_width=True,
-                height=300
+                height=280
             )
-
-    else:
-        st.info("Le fichier source ETAT FTTH RTC RTCL.xlsx n'a pas été chargé.")
 
 
 # =========================================================
 # PAGE RAPPORTS
 # =========================================================
 elif page == "📈 RAPPORTS":
-    st.subheader("Rapports et statistiques avancées")
+    st.subheader("Rapports et statistiques")
 
-    saved_df = load_saved_instances()
-    etat_df = safe_load_excel(ETAT_FILE, ETAT_SHEET, "ETAT FTTH RTC RTCL.xlsx")
-    motif_df = safe_load_excel(MOTIF_FILE, MOTIF_SHEET, "MOTIF TOTAL (1).xlsx")
+    etat_df = load_excel_from_upload_or_local(None, LOCAL_ETAT_FILE, ETAT_SHEET, "ETAT")
+    motif_df = load_excel_from_upload_or_local(None, LOCAL_MOTIF_FILE, MOTIF_SHEET, "MOTIF")
+    assignments_df = load_csv(ASSIGNMENTS_FILE)
+    feedback_df = load_csv(FEEDBACK_FILE)
 
     etat_df, _ = prepare_col_a_filter(etat_df)
     motif_df, _ = prepare_col_a_filter(motif_df)
 
     col_a_values = collect_col_a_values(etat_df, motif_df)
-
     if col_a_values:
         selected_col_a = st.selectbox(
-            "Filtre journalier (colonne A) - ETAT FTTH RTC + MOTIF TOTAL",
+            "Filtre journalier (colonne A)",
             col_a_values,
-            key="rapport_col_a_filter"
+            key="report_day_filter"
         )
-
         etat_df = filter_by_col_a_value(etat_df, selected_col_a)
         motif_df = filter_by_col_a_value(motif_df, selected_col_a)
 
-        st.caption("Le filtre colonne A est appliqué simultanément sur ETAT FTTH RTC et MOTIF TOTAL.")
+    etat_prod_col = find_column(etat_df, ["s.produit", "produit", "s produit"])
+    motif_prod_col = find_column(motif_df, ["s.produit", "produit", "s produit"])
 
-    rapport_produit_col_etat = find_column(etat_df, ["s.produit", "produit", "s produit"])
-    rapport_produit_col_motif = find_column(motif_df, ["s.produit", "produit", "s produit"])
-
-    selected_produit_rapport = st.selectbox(
-        "Filtre s.produit - ETAT FTTH RTC + MOTIF TOTAL",
+    selected_produit = st.selectbox(
+        "Filtre s.produit",
         ["Tous", "FTTH", "FTTHDFO", "RTC", "RTCDTL"],
-        key="rapport_produit_filter"
+        key="report_product_filter"
     )
 
-    if selected_produit_rapport != "Tous":
-        if rapport_produit_col_etat:
-            etat_df = etat_df[
-                etat_df[rapport_produit_col_etat].astype(str).apply(normalize_product) == selected_produit_rapport
-            ]
-        if rapport_produit_col_motif:
-            motif_df = motif_df[
-                motif_df[rapport_produit_col_motif].astype(str).apply(normalize_product) == selected_produit_rapport
-            ]
+    if selected_produit != "Tous":
+        if etat_prod_col:
+            etat_df = etat_df[etat_df[etat_prod_col].astype(str).apply(normalize_product) == selected_produit]
+        if motif_prod_col:
+            motif_df = motif_df[motif_prod_col.astype(str).apply(normalize_product) == selected_produit]
 
     etat_df = etat_df.drop(columns=["_col_a_filter_"], errors="ignore")
     motif_df = motif_df.drop(columns=["_col_a_filter_"], errors="ignore")
 
-    tabs = st.tabs(["📈 Opérationnel", "📄 Source Excel"])
+    tabs = st.tabs(["📊 KPI", "👷 Affectations", "📝 Retours", "📄 Source Excel"])
 
     with tabs[0]:
-        if saved_df.empty:
-            st.info("Aucune instance saisie pour le moment.")
-        else:
-            for col in ["secteur", "motif", "utilisateur", "statut_whatsapp", "agent_assigne"]:
-                if col not in saved_df.columns:
-                    saved_df[col] = ""
+        total_affectations = len(assignments_df) if not assignments_df.empty else 0
+        wa_sent = 0
+        if not assignments_df.empty and "whatsapp_status" in assignments_df.columns:
+            wa_sent = int((assignments_df["whatsapp_status"].astype(str) == "Envoyé").sum())
 
-            total_instances = len(saved_df)
-            whatsapp_sent = int((saved_df["statut_whatsapp"].astype(str) == "Envoyé").sum())
-            agents_count = saved_df["agent_assigne"].astype(str).replace("nan", "").replace("", pd.NA).dropna().nunique()
-            secteurs_count = saved_df["secteur"].astype(str).replace("nan", "").replace("", pd.NA).dropna().nunique()
+        total_retours = len(feedback_df) if not feedback_df.empty else 0
+        email_ok = 0
+        if not feedback_df.empty and "email_status" in feedback_df.columns:
+            email_ok = int((feedback_df["email_status"].astype(str) == "Envoyé").sum())
 
-            k1, k2, k3, k4 = st.columns(4)
-            k1.metric("Instances", total_instances)
-            k2.metric("WhatsApp envoyés", whatsapp_sent)
-            k3.metric("Agents affectés", agents_count)
-            k4.metric("Secteurs actifs", secteurs_count)
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Affectations", total_affectations)
+        k2.metric("WhatsApp envoyés", wa_sent)
+        k3.metric("Retours saisis", total_retours)
+        k4.metric("Emails envoyés", email_ok)
 
-            st.markdown("---")
+        st.markdown("---")
 
-            c1, c2 = st.columns(2)
+        if not assignments_df.empty and "agent_name" in assignments_df.columns:
+            agent_count = assignments_df["agent_name"].fillna("Non renseigné").astype(str).value_counts().reset_index()
+            agent_count.columns = ["Agent", "Nombre"]
+            fig1 = px.bar(agent_count, x="Agent", y="Nombre", color="Nombre", title="Affectations par agent")
+            st.plotly_chart(fig1, use_container_width=True)
 
-            with c1:
-                secteur_count = saved_df["secteur"].fillna("Non renseigné").astype(str).value_counts().reset_index()
-                secteur_count.columns = ["Secteur", "Nombre"]
-                fig1 = px.bar(secteur_count, x="Secteur", y="Nombre", color="Nombre", title="Instances par secteur")
-                st.plotly_chart(fig1, use_container_width=True)
-
-            with c2:
-                agent_count = saved_df["agent_assigne"].fillna("Non renseigné").astype(str).value_counts().reset_index()
-                agent_count.columns = ["Agent", "Nombre"]
-                fig2 = px.bar(agent_count, x="Agent", y="Nombre", color="Nombre", title="Instances par agent")
-                st.plotly_chart(fig2, use_container_width=True)
-
-            c3, c4 = st.columns(2)
-
-            with c3:
-                motif_count = saved_df["motif"].fillna("Non renseigné").astype(str).value_counts().head(15).reset_index()
-                motif_count.columns = ["Motif", "Nombre"]
-                fig3 = px.bar(motif_count, x="Motif", y="Nombre", color="Nombre", title="Top 15 motifs")
-                fig3.update_layout(xaxis_tickangle=-45)
-                st.plotly_chart(fig3, use_container_width=True)
-
-            with c4:
-                status_wa = saved_df["statut_whatsapp"].fillna("Non renseigné").astype(str).value_counts().reset_index()
-                status_wa.columns = ["Statut", "Nombre"]
-                fig4 = px.pie(status_wa, values="Nombre", names="Statut", title="Statut des envois WhatsApp")
-                st.plotly_chart(fig4, use_container_width=True)
-
-            st.markdown("---")
-            st.dataframe(saved_df, use_container_width=True, height=340)
+        if not feedback_df.empty and "produit" in feedback_df.columns:
+            prod_count = feedback_df["produit"].fillna("Non renseigné").astype(str).value_counts().reset_index()
+            prod_count.columns = ["Produit", "Nombre"]
+            fig2 = px.pie(prod_count, values="Nombre", names="Produit", title="Retours par produit")
+            st.plotly_chart(fig2, use_container_width=True)
 
     with tabs[1]:
-        if etat_df.empty and motif_df.empty:
-            st.info("Aucune source Excel chargée.")
+        if assignments_df.empty:
+            st.info("Aucune affectation enregistrée.")
         else:
-            if not etat_df.empty:
-                st.markdown("### Analyse source commandes")
-                secteur_col = find_column(etat_df, ["secteur", "sector"])
-                etat_col = find_column(etat_df, ["etat", "état", "state"])
-                delai_col = find_column(etat_df, ["delai", "délai"])
+            st.dataframe(assignments_df, use_container_width=True, height=380)
+            st.download_button(
+                "⬇️ Export affectations Excel",
+                data=to_excel_bytes(assignments_df, "Affectations"),
+                file_name="affectations_agents.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
-                x1, x2, x3 = st.columns(3)
-                x1.metric("Total commandes source", len(etat_df))
-                x2.metric("Commandes VA", int((etat_df[etat_col].astype(str).str.upper() == "VA").sum()) if etat_col else 0)
-                x3.metric("Délai moyen source", safe_mean_numeric(etat_df[delai_col]) if delai_col else "N/A")
+    with tabs[2]:
+        if feedback_df.empty:
+            st.info("Aucun retour terrain enregistré.")
+        else:
+            st.dataframe(feedback_df, use_container_width=True, height=380)
+            st.download_button(
+                "⬇️ Export retours Excel",
+                data=to_excel_bytes(feedback_df, "Retours"),
+                file_name="retours_intervention.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
-                if secteur_col:
-                    secteur_source = etat_df[secteur_col].fillna("Non renseigné").astype(str).value_counts().reset_index()
-                    secteur_source.columns = ["Secteur", "Nombre"]
-                    fig5 = px.bar(secteur_source, x="Secteur", y="Nombre", color="Nombre", title="Commandes source par secteur")
-                    st.plotly_chart(fig5, use_container_width=True)
-
-                st.markdown("#### Tableau ETAT FTTH RTC filtré")
-                st.dataframe(etat_df, use_container_width=True, height=280)
-
-            if not motif_df.empty:
-                st.markdown("### Analyse source motifs")
-                motif_col = find_column(motif_df, ["motif", "detail", "pc mauvais"])
-                if motif_col:
-                    motif_source = motif_df[motif_col].fillna("Non renseigné").astype(str).value_counts().head(15).reset_index()
-                    motif_source.columns = ["Motif", "Nombre"]
-                    fig6 = px.bar(motif_source, x="Motif", y="Nombre", color="Nombre", title="Top 15 motifs source")
-                    fig6.update_layout(xaxis_tickangle=-45)
-                    st.plotly_chart(fig6, use_container_width=True)
-
-                st.markdown("#### Tableau MOTIF TOTAL filtré")
-                st.dataframe(motif_df, use_container_width=True, height=280)
+    with tabs[3]:
+        if not etat_df.empty:
+            st.markdown("### ETAT FTTH RTC")
+            st.dataframe(etat_df, use_container_width=True, height=280)
+        if not motif_df.empty:
+            st.markdown("### MOTIF TOTAL")
+            st.dataframe(motif_df, use_container_width=True, height=280)
 
 
 # =========================================================
-# PAGES SECONDAIRES
+# AUTRES PAGES
 # =========================================================
 elif page == "🚨 DÉRANGEMENTS":
     st.subheader("Dérangements")
@@ -1208,4 +1323,4 @@ elif page == "🧾 LITIGES":
     st.info("Page prête pour évolution future.")
 
 
-st.caption("InstalPro - Pilotage opérationnel des interventions Fibre & RTC")
+st.caption("InstalPro - Dispatch WhatsApp, affectation agent, retour terrain et email Outlook")

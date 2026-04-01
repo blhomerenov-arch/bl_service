@@ -16,7 +16,7 @@ import streamlit as st
 # =========================================================
 # CONFIG
 # =========================================================
-APP_NAME = "Système Centralisé de Gestion, Dispatching et Suivi des Interventions Fibre & RTC"
+APP_NAME = "InstalPro"
 st.set_page_config(page_title=APP_NAME, layout="wide")
 
 BASE_DIR = Path(__file__).parent

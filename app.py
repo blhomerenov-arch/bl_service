@@ -248,6 +248,17 @@ def normalize_etat_agent(value):
     return mapping.get(txt, str(value).strip().upper())
 
 
+def normalize_product(value):
+    txt = normalize_text(value).replace(" ", "").replace("_", "").replace("-", "")
+    mapping = {
+        "ftth": "FTTH",
+        "ftthdfo": "FTTHDFO",
+        "rtc": "RTC",
+        "rtcdtl": "RTCDTL"
+    }
+    return mapping.get(txt, str(value).strip().upper())
+
+
 def prepare_col_a_filter(df):
     if df is None or df.empty:
         return df, None
@@ -945,12 +956,38 @@ if page == "🗂️ INSTANCES":
 
             st.caption("Filtre appliqué sur ETAT FTTH RTC et MOTIF TOTAL via la colonne A.")
 
-        search_excel = st.text_input(
-            "Recherche dans le fichier source",
-            placeholder="demande, secteur, état..."
-        )
+        produit_col = find_column(etat_df, ["s.produit", "produit", "s produit"])
+        motif_produit_col = find_column(motif_total_df, ["s.produit", "produit", "s produit"])
+        produit_options = ["Tous", "FTTH", "FTTHDFO", "RTC", "RTCDTL"]
 
-        filtered_etat = global_search(etat_df, search_excel).copy()
+        cprod1, cprod2 = st.columns([2, 3])
+
+        with cprod1:
+            selected_produit = st.selectbox(
+                "Filtre s.produit",
+                produit_options,
+                key="source_produit_filter"
+            )
+
+        with cprod2:
+            search_excel = st.text_input(
+                "Recherche dans le fichier source",
+                placeholder="demande, secteur, état..."
+            )
+
+        filtered_etat = etat_df.copy()
+
+        if produit_col and selected_produit != "Tous":
+            filtered_etat = filtered_etat[
+                filtered_etat[produit_col].astype(str).apply(normalize_product) == selected_produit
+            ]
+
+        if motif_produit_col and selected_produit != "Tous":
+            motif_total_df = motif_total_df[
+                motif_total_df[motif_produit_col].astype(str).apply(normalize_product) == selected_produit
+            ]
+
+        filtered_etat = global_search(filtered_etat, search_excel).copy()
 
         etat_col = find_column(filtered_etat, ["etat", "état", "state"])
         secteur_col = find_column(filtered_etat, ["secteur", "sector"])
@@ -1073,6 +1110,25 @@ elif page == "📈 RAPPORTS":
         motif_df = filter_by_col_a_value(motif_df, selected_col_a)
 
         st.caption("Le filtre colonne A est appliqué simultanément sur ETAT FTTH RTC et MOTIF TOTAL.")
+
+    rapport_produit_col_etat = find_column(etat_df, ["s.produit", "produit", "s produit"])
+    rapport_produit_col_motif = find_column(motif_df, ["s.produit", "produit", "s produit"])
+
+    selected_produit_rapport = st.selectbox(
+        "Filtre s.produit - ETAT FTTH RTC + MOTIF TOTAL",
+        ["Tous", "FTTH", "FTTHDFO", "RTC", "RTCDTL"],
+        key="rapport_produit_filter"
+    )
+
+    if selected_produit_rapport != "Tous":
+        if rapport_produit_col_etat:
+            etat_df = etat_df[
+                etat_df[rapport_produit_col_etat].astype(str).apply(normalize_product) == selected_produit_rapport
+            ]
+        if rapport_produit_col_motif:
+            motif_df = motif_df[
+                motif_df[rapport_produit_col_motif].astype(str).apply(normalize_product) == selected_produit_rapport
+            ]
 
     etat_df = etat_df.drop(columns=["_col_a_filter_"], errors="ignore")
     motif_df = motif_df.drop(columns=["_col_a_filter_"], errors="ignore")

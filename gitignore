@@ -1,71 +1,46 @@
-# ==================== FICHIERS SENSIBLES ====================
-# Configuration email (contient mots de passe)
-config_email.json
-alertes_config.json
-
-# ==================== FICHIERS DE DONNÉES GÉNÉRÉS ====================
-# Fichiers créés automatiquement par l'app
-instances_log.xlsx
-derangements.xlsx
-litiges.xlsx
-fiabilisation.xlsx
-
-# Mais GARDER les fichiers sources
-!ETAT*.xlsx
-!MOTIF*.xlsx
-
-# ==================== PYTHON ====================
+# =========================
+# Python
+# =========================
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
 
 # Environnements virtuels
+.venv/
 venv/
 env/
-ENV/
-.venv
 
-# ==================== IDE ====================
+# Outils Python
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# =========================
+# Streamlit
+# =========================
+.streamlit/secrets.toml
+
+# =========================
+# Fichiers locaux générés par l'app
+# =========================
+affectations_agents.csv
+retours_intervention.csv
+parametres_app.json
+smtp_config.json
+logo_maroc_telecom.png
+
+# =========================
+# Fichiers système / éditeurs
+# =========================
+.DS_Store
+Thumbs.db
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
 
-# ==================== OS ====================
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# ==================== STREAMLIT ====================
-.streamlit/secrets.toml
-.streamlit/credentials.toml
-
-# ==================== LOGS ====================
+# =========================
+# Logs / temporaires
+# =========================
 *.log
-logs/
-
-# ==================== BACKUP ====================
-backup/
-*.bak
+tmp/
+temp/

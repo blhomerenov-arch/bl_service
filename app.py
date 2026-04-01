@@ -506,7 +506,7 @@ def render_manager_tab(settings, key, label):
         with st.form(f"edit_{key}_form"):
             st.markdown(f"**Modifier {label.lower()}**")
             old_value = st.selectbox(f"{label} à modifier", current_items, key=f"old_{key}")
-            new_value = st.text_input(f"Nouveau nom", key=f"edit_{key}")
+            new_value = st.text_input("Nouveau nom", key=f"edit_{key}")
             submit = st.form_submit_button("✏️ Modifier")
             if submit:
                 ok, msg = update_item_in_settings(settings, key, old_value, new_value)
@@ -1081,4 +1081,4 @@ elif page == "⚖️ LITIGES":
     st.info("Page prête pour la V3.")
 
 
-st.caption("Pilotage opérationnel des interventions Fibre & RTC")
+st.caption("InstalPro - Pilotage opérationnel des interventions Fibre & RTC")

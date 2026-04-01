@@ -78,12 +78,6 @@ st.markdown(
         border-radius: 10px !important;
     }
 
-    [data-testid="stSidebar"] input::placeholder,
-    [data-testid="stSidebar"] textarea::placeholder {
-        color: #64748b !important;
-        -webkit-text-fill-color: #64748b !important;
-    }
-
     .block-container {
         padding-top: 1.2rem;
         padding-bottom: 2rem;
@@ -232,7 +226,7 @@ def find_column(df, keywords):
     return None
 
 
-def normalize_etat_agent(value):
+def normalize_intervention_code(value):
     txt = normalize_text(value).replace(" ", "").replace("_", "").replace("-", "")
     mapping = {
         "na": "NA",
@@ -299,6 +293,30 @@ def filter_by_col_a_value(df, selected_value):
     return df[df["_col_a_filter_"] == selected_value]
 
 
+def build_full_row_message(row, title="Détail intervention"):
+    lines = [f"{title}", ""]
+    for col, val in row.items():
+        if str(col).startswith("_"):
+            continue
+        if pd.isna(val):
+            continue
+        val_str = str(val).strip()
+        if val_str == "":
+            continue
+        lines.append(f"{col} : {val_str}")
+    lines.append("")
+    lines.append("Cordialement,")
+    lines.append("InstalPro")
+    return "\n".join(lines)
+
+
+def build_whatsapp_url(phone, message):
+    phone = clean_phone(phone)
+    if not phone:
+        return ""
+    return f"https://wa.me/{phone}?text={quote(message)}"
+
+
 # =========================================================
 # SETTINGS
 # =========================================================
@@ -306,12 +324,10 @@ def default_settings():
     return {
         "utilisateurs": ["admin"],
         "secteurs": ["MHAMID", "BOUAAKAZ", "Province M'HAMID"],
-        "agents": ["NA", "RM", "TR", "TL"],
+        "agents": ["Agent 1", "Agent 2"],
         "agent_contacts": {
-            "NA": {"whatsapp": ""},
-            "RM": {"whatsapp": ""},
-            "TR": {"whatsapp": ""},
-            "TL": {"whatsapp": ""}
+            "Agent 1": {"whatsapp": ""},
+            "Agent 2": {"whatsapp": ""}
         },
         "admin_username": "admin",
         "admin_password_hash": hash_password("admin123")
@@ -506,74 +522,6 @@ def update_instance(instance_id, updates):
 
 
 # =========================================================
-# MESSAGE BUILDERS
-# =========================================================
-def build_instance_message(row):
-    return f"""
-Bonjour,
-
-Merci de prendre en charge cette instance.
-
-Demande : {row.get('demande', '')}
-Nom : {row.get('nom', '')}
-Contact : {row.get('contact', '')}
-Adresse : {row.get('adresse', '')}
-Télécopie : {row.get('telecopie', '')}
-Date de réception : {row.get('date_reception', '')}
-Secteur : {row.get('secteur', '')}
-Agent : {row.get('agent', '')}
-Motif : {row.get('motif', '')}
-Utilisateur : {row.get('utilisateur', '')}
-
-Cordialement,
-InstalPro
-""".strip()
-
-
-def build_source_excel_message(row, etat_col):
-    etat_value = row.get(etat_col, "") if etat_col else ""
-    return f"""
-Bonjour,
-
-Merci de prendre en charge cette demande issue du fichier source Excel.
-
-Demande / Référence : {row.get('Demande', row.get('demande', row.get('Commande', row.get('commande', ''))))}
-Nom : {row.get('Nom', row.get('nom', ''))}
-Contact : {row.get('Contact', row.get('contact', ''))}
-Adresse : {row.get('Adresse', row.get('adresse', ''))}
-Secteur : {row.get('Secteur', row.get('secteur', ''))}
-État : {etat_value}
-
-Cordialement,
-InstalPro
-""".strip()
-
-
-def build_whatsapp_url(agent_whatsapp, row):
-    phone = clean_phone(agent_whatsapp)
-    if not phone:
-        return ""
-    text = build_instance_message(row)
-    return f"https://wa.me/{phone}?text={quote(text)}"
-
-
-def build_source_excel_whatsapp_url(agent_whatsapp, row, etat_col):
-    phone = clean_phone(agent_whatsapp)
-    if not phone:
-        return ""
-    text = build_source_excel_message(row, etat_col)
-    return f"https://wa.me/{phone}?text={quote(text)}"
-
-
-def render_whatsapp_button(url):
-    return f"""
-    <div class="wa-button">
-        <a href="{url}" target="_blank">💬 Envoyer par WhatsApp</a>
-    </div>
-    """
-
-
-# =========================================================
 # HEADER
 # =========================================================
 def render_header():
@@ -651,7 +599,7 @@ def render_manager_tab(settings, key, label):
 
 
 def render_agent_contacts_admin(settings):
-    st.markdown("### Numéros WhatsApp des agents")
+    st.markdown("### Vrais agents et numéros WhatsApp")
     if not settings.get("agents"):
         st.info("Aucun agent disponible.")
         return
@@ -791,7 +739,7 @@ if page == "🗂️ INSTANCES":
             telecopie = st.text_input("N° de télécopie *", placeholder="525311326")
             date_reception = st.date_input("Date de réception", datetime.now().date())
             secteur = st.selectbox("Secteur", settings["secteurs"])
-            agent = st.selectbox("Agent destinataire", settings["agents"])
+            agent_assigne = st.selectbox("Agent à envoyer", settings["agents"])
 
         motif_options = [
             "Adresse erronée",
@@ -813,7 +761,7 @@ if page == "🗂️ INSTANCES":
 
         if submit_instance:
             if demande and telecopie and motif:
-                agent_contact = get_agent_contact(settings, agent)
+                agent_contact = get_agent_contact(settings, agent_assigne)
 
                 record = {
                     "instance_id": generate_instance_id(),
@@ -826,7 +774,7 @@ if page == "🗂️ INSTANCES":
                     "telecopie": telecopie,
                     "date_reception": str(date_reception),
                     "secteur": secteur,
-                    "agent": agent,
+                    "agent_assigne": agent_assigne,
                     "agent_whatsapp": agent_contact.get("whatsapp", ""),
                     "motif": motif,
                     "statut_etape": "Étape 1 - enregistrée",
@@ -846,9 +794,14 @@ if page == "🗂️ INSTANCES":
     if saved_df.empty:
         st.info("Aucune instance enregistrée.")
     else:
+        if "agent_assigne" not in saved_df.columns:
+            saved_df["agent_assigne"] = ""
+        if "agent_whatsapp" not in saved_df.columns:
+            saved_df["agent_whatsapp"] = ""
+
         f1, f2, f3 = st.columns(3)
         with f1:
-            search_saved = st.text_input("Recherche", placeholder="demande, agent, motif...")
+            search_saved = st.text_input("Recherche", placeholder="commande, agent, motif...")
         with f2:
             sector_choices = ["Tous"]
             if "secteur" in saved_df.columns:
@@ -862,8 +815,8 @@ if page == "🗂️ INSTANCES":
         if selected_sector != "Tous" and "secteur" in filtered_saved.columns:
             filtered_saved = filtered_saved[filtered_saved["secteur"].astype(str) == selected_sector]
 
-        if selected_agent != "Tous" and "agent" in filtered_saved.columns:
-            filtered_saved = filtered_saved[filtered_saved["agent"].astype(str) == selected_agent]
+        if selected_agent != "Tous" and "agent_assigne" in filtered_saved.columns:
+            filtered_saved = filtered_saved[filtered_saved["agent_assigne"].astype(str) == selected_agent]
 
         try:
             filtered_saved = filtered_saved.sort_values(by="date_saisie", ascending=False)
@@ -872,10 +825,11 @@ if page == "🗂️ INSTANCES":
 
         for _, row in filtered_saved.iterrows():
             instance_id = str(row.get("instance_id", ""))
-            agent_name = str(row.get("agent", ""))
+            agent_name = str(row.get("agent_assigne", ""))
             agent_contact = get_agent_contact(settings, agent_name)
             agent_whatsapp = agent_contact.get("whatsapp", "") or row.get("agent_whatsapp", "")
-            wa_url = build_whatsapp_url(agent_whatsapp, row)
+            message = build_full_row_message(row.to_dict(), title="Nouvelle intervention terrain")
+            wa_url = build_whatsapp_url(agent_whatsapp, message)
 
             st.markdown('<div class="glass-card">', unsafe_allow_html=True)
 
@@ -884,9 +838,10 @@ if page == "🗂️ INSTANCES":
             with c1:
                 st.markdown(
                     f"""
-**Demande :** {row.get('demande', '')}  
+**Commande :** {row.get('demande', '')}  
 **Agent :** {agent_name}  
 **Secteur :** {row.get('secteur', '')}  
+**Adresse :** {row.get('adresse', '')}  
 **Motif :** {row.get('motif', '')}  
 **Statut global :** {row.get('statut_etape', '')}
 """
@@ -922,18 +877,16 @@ if page == "🗂️ INSTANCES":
 
             with st.expander(f"Voir détail - {row.get('demande', '')}"):
                 st.text_area(
-                    "Message à envoyer",
-                    value=build_instance_message(row),
-                    height=220,
+                    "Message complet envoyé à l'agent",
+                    value=message,
+                    height=260,
                     key=f"msg_{instance_id}"
                 )
-                st.write(f"WhatsApp agent : {agent_whatsapp}")
-                st.write(f"Statut WhatsApp : {row.get('statut_whatsapp', 'Non envoyé')}")
 
             st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("---")
-    st.subheader("Données source Excel et dispatch par agent")
+    st.subheader("Données source Excel et envoi à un agent")
 
     etat_df = safe_load_excel(ETAT_FILE, ETAT_SHEET, "ETAT FTTH RTC RTCL.xlsx")
     motif_total_df = safe_load_excel(MOTIF_FILE, MOTIF_SHEET, "MOTIF TOTAL (1).xlsx")
@@ -972,7 +925,7 @@ if page == "🗂️ INSTANCES":
         with cprod2:
             search_excel = st.text_input(
                 "Recherche dans le fichier source",
-                placeholder="demande, secteur, état..."
+                placeholder="commande, adresse, secteur, état..."
             )
 
         filtered_etat = etat_df.copy()
@@ -994,12 +947,13 @@ if page == "🗂️ INSTANCES":
         demande_col = find_column(filtered_etat, ["demande", "commande", "reference", "référence"])
 
         if etat_col:
-            filtered_etat["AGENT_CIBLE"] = filtered_etat[etat_col].apply(normalize_etat_agent)
+            filtered_etat["CODE_INTERVENTION"] = filtered_etat[etat_col].apply(normalize_intervention_code)
             actionable_df = filtered_etat[
-                filtered_etat["AGENT_CIBLE"].isin(["NA", "RM", "TR", "TL"])
+                filtered_etat["CODE_INTERVENTION"].isin(["NA", "RM", "TR", "TL"])
             ].copy()
 
             st.markdown("### Lignes dispatchables selon la colonne État")
+            st.caption("NA / RM / TR / TL = code intervention, pas nom agent.")
 
             if actionable_df.empty:
                 st.info("Aucune ligne avec État = NA / RM / TR / TL.")
@@ -1015,29 +969,41 @@ if page == "🗂️ INSTANCES":
                 preview_df = actionable_df.head(max_rows)
 
                 for idx, row in preview_df.iterrows():
-                    agent_code = row.get("AGENT_CIBLE", "")
-                    agent_contact = get_agent_contact(settings, agent_code)
+                    code_intervention = row.get("CODE_INTERVENTION", "")
+                    demande_value = row.get(demande_col, "") if demande_col else ""
+                    secteur_value = row.get(secteur_col, "") if secteur_col else ""
+                    etat_value = row.get(etat_col, "")
+
+                    assign_col1, assign_col2 = st.columns([3, 5])
+                    with assign_col1:
+                        selected_real_agent = st.selectbox(
+                            f"Agent pour ligne {idx}",
+                            settings["agents"],
+                            key=f"excel_agent_select_{idx}"
+                        )
+
+                    agent_contact = get_agent_contact(settings, selected_real_agent)
                     agent_whatsapp = agent_contact.get("whatsapp", "")
-                    wa_url = build_source_excel_whatsapp_url(agent_whatsapp, row, etat_col)
+                    full_row_message = build_full_row_message(
+                        row.to_dict(),
+                        title=f"Intervention terrain - Code {code_intervention}"
+                    )
+                    wa_url = build_whatsapp_url(agent_whatsapp, full_row_message)
 
                     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
 
                     c1, c2 = st.columns([5.4, 1.8])
 
                     with c1:
-                        demande_value = row.get(demande_col, "") if demande_col else ""
-                        secteur_value = row.get(secteur_col, "") if secteur_col else ""
-                        etat_value = row.get(etat_col, "")
-
                         st.markdown(
                             f"""
-**Demande :** {demande_value}  
+**Commande :** {demande_value}  
 **Secteur :** {secteur_value}  
 **État source :** {etat_value}  
-**Agent cible :** {agent_code}
+**Code intervention :** {code_intervention}  
+**Agent choisi :** {selected_real_agent}
 """
                         )
-
                         st.markdown(
                             f"""
 <span class="info-chip">WhatsApp agent : {agent_whatsapp or 'Non configuré'}</span>
@@ -1053,9 +1019,9 @@ if page == "🗂️ INSTANCES":
 
                     with st.expander(f"Détail ligne Excel - {demande_value if demande_value else idx}"):
                         st.text_area(
-                            "Message WhatsApp",
-                            value=build_source_excel_message(row, etat_col),
-                            height=220,
+                            "Message complet WhatsApp",
+                            value=full_row_message,
+                            height=260,
                             key=f"excel_msg_{idx}"
                         )
                         st.dataframe(
@@ -1139,19 +1105,19 @@ elif page == "📈 RAPPORTS":
         if saved_df.empty:
             st.info("Aucune instance saisie pour le moment.")
         else:
-            for col in ["secteur", "agent", "motif", "utilisateur", "statut_whatsapp"]:
+            for col in ["secteur", "motif", "utilisateur", "statut_whatsapp", "agent_assigne"]:
                 if col not in saved_df.columns:
                     saved_df[col] = ""
 
             total_instances = len(saved_df)
             whatsapp_sent = int((saved_df["statut_whatsapp"].astype(str) == "Envoyé").sum())
-            agents_count = saved_df["agent"].astype(str).replace("nan", "").replace("", pd.NA).dropna().nunique()
+            agents_count = saved_df["agent_assigne"].astype(str).replace("nan", "").replace("", pd.NA).dropna().nunique()
             secteurs_count = saved_df["secteur"].astype(str).replace("nan", "").replace("", pd.NA).dropna().nunique()
 
             k1, k2, k3, k4 = st.columns(4)
             k1.metric("Instances", total_instances)
             k2.metric("WhatsApp envoyés", whatsapp_sent)
-            k3.metric("Agents actifs", agents_count)
+            k3.metric("Agents affectés", agents_count)
             k4.metric("Secteurs actifs", secteurs_count)
 
             st.markdown("---")
@@ -1165,7 +1131,7 @@ elif page == "📈 RAPPORTS":
                 st.plotly_chart(fig1, use_container_width=True)
 
             with c2:
-                agent_count = saved_df["agent"].fillna("Non renseigné").astype(str).value_counts().reset_index()
+                agent_count = saved_df["agent_assigne"].fillna("Non renseigné").astype(str).value_counts().reset_index()
                 agent_count.columns = ["Agent", "Nombre"]
                 fig2 = px.bar(agent_count, x="Agent", y="Nombre", color="Nombre", title="Instances par agent")
                 st.plotly_chart(fig2, use_container_width=True)
